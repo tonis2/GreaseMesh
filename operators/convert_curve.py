@@ -29,15 +29,15 @@ class GPTOOLS_OT_convert_curve(bpy.types.Operator):
         gp_data = gp_obj.data
         for layer in gp_data.layers:
             for frame in layer.frames:
-                for stroke in frame.strokes:
+                for stroke in frame.drawing.strokes:
                     spline = curve_data.splines.new("BEZIER")
                     spline.bezier_points.add(len(stroke.points) - 1)
 
                     for i, pt in enumerate(stroke.points):
                         bp = spline.bezier_points[i]
-                        bp.co = pt.co
-                        bp.handle_left = pt.co
-                        bp.handle_right = pt.co
+                        bp.co = pt.position
+                        bp.handle_left = pt.position
+                        bp.handle_right = pt.position
 
         # Set active
         context.view_layer.objects.active = curve_obj

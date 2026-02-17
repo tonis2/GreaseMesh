@@ -32,10 +32,10 @@ class GPTOOLS_OT_convert_mesh(bpy.types.Operator):
         gp_data = gp_obj.data
         for layer in gp_data.layers:
             for frame in layer.frames:
-                for stroke in frame.strokes:
+                for stroke in frame.drawing.strokes:
                     stroke_start = len(vertices)
                     for i, pt in enumerate(stroke.points):
-                        vertices.append(pt.co)
+                        vertices.append(pt.position)
                         if i > 0:
                             edges.append((stroke_start + i - 1, stroke_start + i))
 

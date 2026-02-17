@@ -30,19 +30,16 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Solid Mesh Section
         box = layout.box()
         box.label(text="Solid Mesh", icon="MESH_CUBE")
-
-        props = context.scene.gptools
-        col = box.column(align=True)
-        col.prop(props, "solid_thickness")
-        col.separator()
-        col.operator(
+        box.operator(
             "gptools.solid_mesh", text="Create Solid Mesh", icon="MOD_SOLIDIFY"
         )
+        box.label(text="Settings in Modifiers panel", icon="INFO")
 
         # Screw Mesh Section
         box = layout.box()
         box.label(text="Screw Mesh", icon="MOD_SCREW")
 
+        props = context.scene.gptools
         col = box.column(align=True)
         col.prop(props, "screw_axis")
         col.prop(props, "screw_segments")

@@ -16,10 +16,10 @@ def gpencil_to_points(gp_obj):
 
     for layer in gp_data.layers:
         for frame in layer.frames:
-            for stroke in frame.strokes:
+            for stroke in frame.drawing.strokes:
                 stroke_points = []
                 for pt in stroke.points:
-                    stroke_points.append(pt.co.copy())
+                    stroke_points.append(pt.position.copy())
                 points.append(stroke_points)
 
     return points
@@ -32,6 +32,6 @@ def get_stroke_count(gp_obj):
 
     for layer in gp_data.layers:
         for frame in layer.frames:
-            count += len(frame.strokes)
+            count += len(frame.drawing.strokes)
 
     return count

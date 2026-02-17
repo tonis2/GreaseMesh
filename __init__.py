@@ -17,6 +17,7 @@ import sys
 modules = [
     "grease_mesh.properties",
     "grease_mesh.panels",
+    "grease_mesh.modifiers",
     "grease_mesh.utils.conversion",
     "grease_mesh.operators.add_gpencil",
     "grease_mesh.operators.convert_curve",
@@ -36,7 +37,7 @@ def reload_modules():
 
 
 # Import modules
-from . import properties, panels
+from . import properties, panels, modifiers
 from .operators import (
     add_gpencil,
     convert_curve,
@@ -50,6 +51,7 @@ from .operators import (
 registration_modules = [
     properties,
     panels,
+    modifiers,
     add_gpencil,
     convert_curve,
     convert_mesh,

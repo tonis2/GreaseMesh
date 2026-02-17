@@ -34,9 +34,9 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         gp_data = gp_obj.data
         for layer in gp_data.layers:
             for frame in layer.frames:
-                for stroke in frame.strokes:
+                for stroke in frame.drawing.strokes:
                     for pt in stroke.points:
-                        profile_points.append(pt.co.copy())
+                        profile_points.append(pt.position.copy())
 
         if len(profile_points) < 2:
             self.report({"ERROR"}, "Need at least 2 points in Grease Pencil")
