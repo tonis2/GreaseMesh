@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "grease_mesh"
+version = "1.0.0"
+name = "Grease Mesh"
+tagline = "Easy toolbox for creating meshes from Grease Pencil"
+maintainer = "Your Name"
+type = "add-on"
+
+website = ""
+
+tags = ["Mesh", "Grease Pencil", "Modeling"]
+
+blender_version_min = "3.6.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
