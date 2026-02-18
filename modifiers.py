@@ -45,14 +45,37 @@ def create_gp_controller_node_group():
 
     # Create simple passthrough nodes
     input_node = node_group.nodes.new("NodeGroupInput")
-    input_node.location = (-200, 0)
+    input_node.location = (-400, 0)
 
     output_node = node_group.nodes.new("NodeGroupOutput")
     output_node.location = (200, 0)
 
-    # Just pass geometry through
     links = node_group.links
-    links.new(input_node.outputs["Geometry"], output_node.inputs["Geometry"])
+
+    # Create Store Named Attribute nodes to make inputs appear "active"
+    # These accept the float inputs but don't affect geometry position
+    # They just store the values as attributes (which we don't use)
+    store_thickness = node_group.nodes.new("GeometryNodeStoreNamedAttribute")
+    store_thickness.location = (-200, 150)
+    store_thickness.data_type = "FLOAT"
+    store_thickness.domain = "POINT"
+    store_thickness.inputs["Name"].default_value = "_thickness"
+
+    store_roundness = node_group.nodes.new("GeometryNodeStoreNamedAttribute")
+    store_roundness.location = (-200, -150)
+    store_roundness.data_type = "FLOAT"
+    store_roundness.domain = "POINT"
+    store_roundness.inputs["Name"].default_value = "_roundness"
+
+    # Connect geometry through the store nodes (position unchanged)
+    # Input -> Store Thickness -> Store Roundness -> Output
+    links.new(input_node.outputs["Geometry"], store_thickness.inputs["Geometry"])
+    links.new(store_thickness.outputs["Geometry"], store_roundness.inputs["Geometry"])
+    links.new(store_roundness.outputs["Geometry"], output_node.inputs["Geometry"])
+
+    # Connect the float inputs to Value sockets (makes them appear active in modifier panel)
+    links.new(input_node.outputs["Thickness"], store_thickness.inputs["Value"])
+    links.new(input_node.outputs["Roundness"], store_roundness.inputs["Value"])
 
     return node_group
 
@@ -98,19 +121,20 @@ def add_gp_mesh_controller(obj, thickness=0.1, roundness=0.3):
     node_group = create_gp_controller_node_group()
 
     # Step 2: Add working modifiers (these do the actual work)
-    # Solidify modifier
-    solidify = obj.modifiers.new(name="_GPT_Solidify", type="SOLIDIFY")
+    # Use descriptive names so they make sense to users
+    # Solidify modifier - renamed to "Thickness"
+    solidify = obj.modifiers.new(name="Thickness", type="SOLIDIFY")
     solidify.thickness = thickness
     solidify.offset = 0.0
     solidify.use_rim = True
     solidify.use_rim_only = False
     solidify.show_expanded = False
 
-    # Bevel modifier
+    # Bevel modifier - renamed to "Roundness"
     bevel_width = roundness * 0.5
     bevel_segments = max(1, int(roundness * 12))
 
-    bevel = obj.modifiers.new(name="_GPT_Bevel", type="BEVEL")
+    bevel = obj.modifiers.new(name="Roundness", type="BEVEL")
     bevel.width = bevel_width
     bevel.segments = bevel_segments
     bevel.limit_method = "ANGLE"
@@ -148,7 +172,7 @@ def add_gp_mesh_controller(obj, thickness=0.1, roundness=0.3):
 def update_bevel_segments_from_driver(obj):
     """Update bevel segments based on GN roundness value"""
     gn_mod = obj.modifiers.get("GP Mesh")
-    bevel = obj.modifiers.get("_GPT_Bevel")
+    bevel = obj.modifiers.get("Roundness")
 
     if gn_mod and bevel:
         roundness = gn_mod.get("Socket_2", 0.3)
