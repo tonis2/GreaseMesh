@@ -33,7 +33,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.operator(
             "gptools.solid_mesh", text="Create Solid Mesh", icon="MOD_SOLIDIFY"
         )
-        box.label(text="Settings in Modifiers panel", icon="INFO")
+        box.label(text="Adjust in 'GP Mesh' modifier", icon="INFO")
 
         # Screw Mesh Section
         box = layout.box()

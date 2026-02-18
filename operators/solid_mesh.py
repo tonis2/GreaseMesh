@@ -2,7 +2,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 from ..utils.conversion import get_active_grease_pencil
-from ..modifiers import add_grease_pencil_solidify_modifier
+from ..modifiers import add_gp_mesh_controller, update_bevel_segments_from_driver
 
 
 class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
@@ -74,11 +74,9 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "Failed to create faces")
             return {"CANCELLED"}
 
-        # Add the Solidify and Bevel modifiers (stays live - not applied)
-        # User can adjust thickness and roundness in the Modifiers panel
-        add_grease_pencil_solidify_modifier(
-            mesh_obj, thickness=0.1, bevel_width=0.02, bevel_segments=2
-        )
+        # Add GP Mesh controller with working modifiers behind the scenes
+        # User sees only the "GP Mesh" modifier with Thickness and Roundness controls
+        add_gp_mesh_controller(mesh_obj, thickness=0.1, roundness=0.3)
 
         # Delete original GP
         if gp_name in bpy.data.objects:
