@@ -74,8 +74,11 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "Failed to create faces")
             return {"CANCELLED"}
 
-        # Add the Solidify modifier (stays live - not applied)
-        add_grease_pencil_solidify_modifier(mesh_obj)
+        # Add the Solidify and Bevel modifiers (stays live - not applied)
+        # User can adjust thickness and roundness in the Modifiers panel
+        add_grease_pencil_solidify_modifier(
+            mesh_obj, thickness=0.1, bevel_width=0.02, bevel_segments=2
+        )
 
         # Delete original GP
         if gp_name in bpy.data.objects:
