@@ -2,7 +2,7 @@ import bpy
 
 
 def add_solid_mesh_modifiers(obj, thickness=0.1, roundness=0.3):
-    """Add Solidify, Bevel, and Subdivision modifiers to a mesh object"""
+    """Add Decimate, Solidify, Bevel, and Subdivision modifiers to a mesh object"""
 
     # Solidify modifier
     solidify = obj.modifiers.new(name="Solidify", type="SOLIDIFY")
@@ -16,7 +16,7 @@ def add_solid_mesh_modifiers(obj, thickness=0.1, roundness=0.3):
     bevel.width = roundness * 0.5
     bevel.segments = max(1, int(roundness * 12))
     bevel.limit_method = "ANGLE"
-    bevel.angle_limit = 0.5236
+    bevel.angle_limit = 0.5236  # ~30 degrees
     bevel.use_clamp_overlap = True
 
     # Subdivision Surface modifier

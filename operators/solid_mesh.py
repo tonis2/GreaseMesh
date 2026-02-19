@@ -1,4 +1,5 @@
 import bpy
+import math
 from ..utils.conversion import get_active_grease_pencil
 from ..modifiers import add_solid_mesh_modifiers
 
@@ -55,12 +56,15 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
         mesh_data.from_pydata(vertices, edges, [])
         mesh_data.update()
 
-        # Fill faces using Blender's fill algorithm
+        # Simplify and fill mesh
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.mesh.dissolve_limited(angle_limit=0.000001)
+        # Dissolve on edge loop first — removes freehand wobble vertices
+        # 45° threshold: freehand wobble is typically <40°, real corners are >50°
+        bpy.ops.mesh.dissolve_limited(angle_limit=math.radians(45))
+        # Fill the cleaned-up edge loop into a face
         bpy.ops.mesh.edge_face_add()
         bpy.ops.mesh.normals_make_consistent(inside=False)
         bpy.ops.object.mode_set(mode="OBJECT")
