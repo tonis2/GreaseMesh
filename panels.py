@@ -40,12 +40,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Screw Mesh Section
         box = layout.box()
         box.label(text="Screw Mesh", icon="MOD_SCREW")
-
-        props = context.scene.gptools
         col = box.column(align=True)
-        col.prop(props, "screw_axis")
-        col.prop(props, "screw_segments")
-        col.separator()
         col.operator("gptools.screw_mesh", text="Screw", icon="MOD_SCREW")
         col.operator("gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE")
 

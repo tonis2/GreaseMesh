@@ -71,6 +71,10 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         screw.use_merge_vertices = True
         screw.merge_threshold = 0.0001
 
+        # Decimate modifier
+        decimate = mesh_obj.modifiers.new(name="Decimate", type="DECIMATE")
+        decimate.ratio = 0.5
+
         # Select and activate
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
@@ -80,6 +84,15 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         # Delete original GP
         if gp_name in bpy.data.objects:
             bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
+
+        # Switch Properties panel to Modifiers tab
+        for area in context.screen.areas:
+            if area.type == 'PROPERTIES':
+                for space in area.spaces:
+                    if space.type == 'PROPERTIES':
+                        space.context = 'MODIFIER'
+                        break
+                break
 
         self.report({"INFO"}, "Screw mesh created.")
         return {"FINISHED"}
@@ -124,6 +137,10 @@ class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
         screw.use_merge_vertices = True
         screw.merge_threshold = 0.0001
 
+        # Decimate modifier
+        decimate = mesh_obj.modifiers.new(name="Decimate", type="DECIMATE")
+        decimate.ratio = 0.5
+
         # Select and activate
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
@@ -133,6 +150,15 @@ class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
         # Delete original GP
         if gp_name in bpy.data.objects:
             bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
+
+        # Switch Properties panel to Modifiers tab
+        for area in context.screen.areas:
+            if area.type == 'PROPERTIES':
+                for space in area.spaces:
+                    if space.type == 'PROPERTIES':
+                        space.context = 'MODIFIER'
+                        break
+                break
 
         self.report({"INFO"}, "Square screw mesh created.")
         return {"FINISHED"}
