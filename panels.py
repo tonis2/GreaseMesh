@@ -1,4 +1,5 @@
 import bpy
+import os
 
 
 class GPTOOLS_PT_main(bpy.types.Panel):
@@ -56,10 +57,12 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.prop(props, "lattice_resolution")
         box.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
 
-        # Dev Section (for easy reload during development)
-        box = layout.box()
-        box.label(text="Development", icon="SCRIPT")
-        box.operator("gptools.reload_addon", text="Reload Addon", icon="FILE_REFRESH")
+        # Dev Section — only visible when running from a local dev path
+        addon_dir = os.path.dirname(os.path.realpath(__file__))
+        if "extensions" not in addon_dir:
+            box = layout.box()
+            box.label(text="Development", icon="SCRIPT")
+            box.operator("gptools.reload_addon", text="Reload Addon", icon="FILE_REFRESH")
 
 
 classes = [
