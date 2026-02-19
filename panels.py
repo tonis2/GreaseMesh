@@ -33,8 +33,12 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Solid Mesh Section
         box = layout.box()
         box.label(text="Solid Mesh", icon="MESH_CUBE")
-        box.operator(
-            "gptools.solid_mesh", text="Create Solid Mesh", icon="MOD_SOLIDIFY"
+        col = box.column(align=True)
+        col.operator(
+            "gptools.solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY"
+        )
+        col.operator(
+            "gptools.mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR"
         )
 
         # Screw Mesh Section

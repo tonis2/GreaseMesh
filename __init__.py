@@ -25,6 +25,7 @@ modules = [
     "grease_mesh.operators.convert_line",
     "grease_mesh.operators.solid_mesh",
     "grease_mesh.operators.screw_mesh",
+    "grease_mesh.operators.mirror_mesh",
     "grease_mesh.operators.apply_modifiers",
     "grease_mesh.operators.dev_reload",
 ]
@@ -69,6 +70,7 @@ from .operators import (
     convert_line,
     solid_mesh,
     screw_mesh,
+    mirror_mesh,
     apply_modifiers,
     dev_reload,
 )
@@ -83,6 +85,7 @@ registration_modules = [
     convert_line,
     solid_mesh,
     screw_mesh,
+    mirror_mesh,
     apply_modifiers,
     dev_reload,
 ]
