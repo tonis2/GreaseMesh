@@ -21,24 +21,26 @@ class GPTOOLS_PT_main(bpy.types.Panel):
 
         # Convert Section
         box = layout.box()
-        box.label(text="Convert", icon="IMPORT")
-
-        col = box.column(align=True)
-        col.operator("gptools.convert_curve", text="To Curve", icon="CURVE_BEZCURVE")
-        col.operator("gptools.convert_mesh", text="To Mesh", icon="MESH_DATA")
-        col.operator(
-            "gptools.convert_line", text="To Line", icon="TRACKING_BACKWARDS_SINGLE"
-        )
+        row = box.row(align=True)
+        row.label(text="Convert", icon="IMPORT")
+        row.operator("gptools.convert_curve", text="", icon="CURVE_BEZCURVE")
+        row.operator("gptools.convert_mesh", text="", icon="MESH_DATA")
+        row.operator("gptools.convert_line", text="", icon="TRACKING_BACKWARDS_SINGLE")
 
         # Solid Mesh Section
         box = layout.box()
         box.label(text="Solid Mesh", icon="MESH_CUBE")
+        props = context.scene.gptools
+        box.prop(props, "solid_round")
         col = box.column(align=True)
         col.operator(
             "gptools.solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY"
         )
         col.operator(
             "gptools.mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR"
+        )
+        col.operator(
+            "gptools.lathe_mesh", text="Lathe Mesh", icon="MOD_SCREW"
         )
 
         # Screw Mesh Section

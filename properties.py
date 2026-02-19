@@ -14,6 +14,12 @@ class GPToolsProperties(bpy.types.PropertyGroup):
         unit="LENGTH",
     )
 
+    solid_round: bpy.props.BoolProperty(
+        name="Round",
+        description="Add Bevel and Subdivision modifiers for rounded edges",
+        default=False,
+    )
+
     solid_roundness: bpy.props.FloatProperty(
         name="Roundness",
         description="Roundness of edges for solid mesh",

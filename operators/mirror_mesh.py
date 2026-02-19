@@ -2,6 +2,7 @@ import bpy
 import math
 from mathutils import Vector
 from ..utils.conversion import get_active_grease_pencil
+from ..modifiers import add_solid_mesh_modifiers
 
 
 class GPTOOLS_OT_mirror_mesh(bpy.types.Operator):
@@ -125,12 +126,13 @@ class GPTOOLS_OT_mirror_mesh(bpy.types.Operator):
         mirror.use_clip = True
         mirror.merge_threshold = 0.001
 
-        # Add Solidify for depth (extrudes along the flat axis)
-        solidify = mesh_obj.modifiers.new(name="Solidify", type="SOLIDIFY")
-        solidify.thickness = props.solid_thickness
-        solidify.offset = 0.0
-        solidify.use_rim = True
-        solidify.use_rim_only = False
+        # Add Solidify (and optionally Bevel + Subdiv if Round is enabled)
+        add_solid_mesh_modifiers(
+            mesh_obj,
+            thickness=props.solid_thickness,
+            roundness=props.solid_roundness,
+            round_edges=props.solid_round,
+        )
 
         # Delete original GP
         if gp_name in bpy.data.objects:

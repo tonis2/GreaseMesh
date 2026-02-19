@@ -75,11 +75,12 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
             bpy.data.meshes.remove(mesh_data)
             return {"CANCELLED"}
 
-        # Add modifier stack (Solidify + Bevel + Subdiv)
+        # Add modifier stack
         add_solid_mesh_modifiers(
             mesh_obj,
             thickness=props.solid_thickness,
             roundness=props.solid_roundness,
+            round_edges=props.solid_round,
         )
 
         # Delete original GP
