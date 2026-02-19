@@ -42,10 +42,6 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 2. `Edit > Preferences > Add-ons > Install from Disk...`
 3. Select the ZIP and enable "Grease Mesh"
 
-### Blender 3.6 - 4.1
-1. Copy the addon folder to your Blender addons directory
-2. Enable in `Edit > Preferences > Add-ons`
-
 ## Tips
 - **Solid/Mirror Mesh**: Draw closed shapes for best results. Toggle **Round** for smooth edges.
 - **Lathe Mesh**: Draw the right-half silhouette of your object from front view. The operator picks the correct revolution axis and centerline automatically.
