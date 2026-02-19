@@ -50,6 +50,12 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         col.operator("gptools.screw_mesh", text="Screw", icon="MOD_SCREW")
         col.operator("gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE")
 
+        # Lattice Wrap Section
+        box = layout.box()
+        box.label(text="Lattice Wrap", icon="MOD_LATTICE")
+        box.prop(props, "lattice_resolution")
+        box.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
+
         # Dev Section (for easy reload during development)
         box = layout.box()
         box.label(text="Development", icon="SCRIPT")

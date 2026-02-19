@@ -50,6 +50,15 @@ class GPToolsProperties(bpy.types.PropertyGroup):
         max=256,
     )
 
+    # Lattice Wrap settings
+    lattice_resolution: bpy.props.IntProperty(
+        name="Resolution",
+        description="Lattice control point resolution per axis",
+        default=10,
+        min=2,
+        max=32,
+    )
+
 
 classes = [
     GPToolsProperties,

@@ -27,6 +27,7 @@ modules = [
     "grease_mesh.operators.screw_mesh",
     "grease_mesh.operators.mirror_mesh",
     "grease_mesh.operators.lathe_mesh",
+    "grease_mesh.operators.lattice_wrap",
     "grease_mesh.operators.apply_modifiers",
     "grease_mesh.operators.dev_reload",
 ]
@@ -73,6 +74,7 @@ from .operators import (
     screw_mesh,
     mirror_mesh,
     lathe_mesh,
+    lattice_wrap,
     apply_modifiers,
     dev_reload,
 )
@@ -89,6 +91,7 @@ registration_modules = [
     screw_mesh,
     mirror_mesh,
     lathe_mesh,
+    lattice_wrap,
     apply_modifiers,
     dev_reload,
 ]
