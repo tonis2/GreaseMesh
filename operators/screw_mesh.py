@@ -11,6 +11,7 @@ def build_profile_mesh(context, gp_obj):
 
     vertices = []
     edges = []
+    matrix = gp_obj.matrix_world
 
     gp_data = gp_obj.data
     for layer in gp_data.layers:
@@ -20,7 +21,8 @@ def build_profile_mesh(context, gp_obj):
                     continue
                 offset = len(vertices)
                 for pt in stroke.points:
-                    vertices.append(tuple(pt.position))
+                    world_pos = matrix @ pt.position
+                    vertices.append(tuple(world_pos))
                 n = len(stroke.points)
                 for i in range(n - 1):
                     edges.append((offset + i, offset + i + 1))

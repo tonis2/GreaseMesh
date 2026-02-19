@@ -15,6 +15,9 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box = layout.box()
         box.label(text="Create", icon="GREASEPENCIL")
         box.operator("gptools.add_gpencil", text="Add New Grease Pencil", icon="ADD")
+        box.operator(
+            "gptools.apply_all_modifiers", text="Apply All Modifiers", icon="CHECKMARK"
+        )
 
         # Convert Section
         box = layout.box()
