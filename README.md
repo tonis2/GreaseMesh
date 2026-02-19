@@ -19,8 +19,6 @@ Quick conversions from Grease Pencil strokes:
 ### Solid Mesh
 Turn drawn shapes into extruded 3D objects with thickness.
 - **Solid Mesh** — Fills the drawn shape, adds Solidify for thickness. Toggle **Round** for beveled edges.
-- **Mirror Mesh** — Draw half a shape, get the full mirrored object. Auto-detects the mirror axis from the drawing.
-- **Lathe Mesh** — Draw half a silhouette (e.g. a vase or column profile), get a 360° revolved solid. Auto-detects the revolution axis — no manual axis selection needed.
 
 ### Screw Mesh
 Profile-based revolution with manual axis control.
@@ -43,8 +41,7 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 3. Select the ZIP and enable "Grease Mesh"
 
 ## Tips
-- **Solid/Mirror Mesh**: Draw closed shapes for best results. Toggle **Round** for smooth edges.
-- **Lathe Mesh**: Draw the right-half silhouette of your object from front view. The operator picks the correct revolution axis and centerline automatically.
+- **Solid Mesh**: Draw closed shapes for best results. Toggle **Round** for smooth edges.
 - **Screw Mesh**: Draw an open profile on one side of the axis.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
 - All operators leave modifiers non-destructive — tweak settings in the Properties > Modifiers panel after creation.
