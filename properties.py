@@ -31,17 +31,6 @@ class GPToolsProperties(bpy.types.PropertyGroup):
     )
     
     # Screw Mesh settings
-    screw_axis: bpy.props.EnumProperty(
-        name="Axis",
-        description="Axis to revolve around for screw mesh",
-        items=[
-            ("X", "X", "Revolve around X axis"),
-            ("Y", "Y", "Revolve around Y axis"),
-            ("Z", "Z", "Revolve around Z axis"),
-        ],
-        default="Z",
-    )
-
     screw_segments: bpy.props.IntProperty(
         name="Segments",
         description="Number of segments for screw mesh",

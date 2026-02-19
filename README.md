@@ -21,8 +21,8 @@ Turn drawn shapes into extruded 3D objects with thickness.
 - **Solid Mesh** — Fills the drawn shape, adds Solidify for thickness. Toggle **Round** for beveled edges.
 
 ### Screw Mesh
-Profile-based revolution with manual axis control.
-- **Screw** — Revolves a drawn profile around a chosen axis (X/Y/Z) with configurable segments.
+Revolve a drawn profile into a 3D shape (vases, columns, turned objects).
+- **Screw** — Revolves a drawn profile 360° with configurable segments. Auto-detects the revolution axis and centerline from the drawing.
 - **Square Screw** — Same as Screw but with 4 steps for a square cross-section.
 
 ### Lattice Wrap
@@ -42,7 +42,7 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 
 ## Tips
 - **Solid Mesh**: Draw closed shapes for best results. Toggle **Round** for smooth edges.
-- **Screw Mesh**: Draw an open profile on one side of the axis.
+- **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
 - All operators leave modifiers non-destructive — tweak settings in the Properties > Modifiers panel after creation.
 
