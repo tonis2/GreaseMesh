@@ -6,29 +6,22 @@ class GPToolsProperties(bpy.types.PropertyGroup):
     solid_thickness: bpy.props.FloatProperty(
         name="Thickness",
         description="Thickness for solid mesh extrusion",
-        default=0.1,
+        default=1.0,
         min=0.001,
         max=10.0,
         step=0.1,
         precision=3,
         unit="LENGTH",
     )
-    
-    solid_fill: bpy.props.BoolProperty(
-        name="Fill",
-        description="Fill the extruded faces",
-        default=True,
-    )
-    
-    solid_merge_distance: bpy.props.FloatProperty(
-        name="Merge Distance",
-        description="Distance for merging close vertices (Merge by Distance)",
-        default=0.0001,
+
+    solid_roundness: bpy.props.FloatProperty(
+        name="Roundness",
+        description="Roundness of edges for solid mesh",
+        default=0.3,
         min=0.0,
         max=1.0,
         step=0.01,
-        precision=4,
-        unit="LENGTH",
+        precision=3,
     )
     
     # Screw Mesh settings

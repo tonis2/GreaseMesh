@@ -1,5 +1,4 @@
 import bpy
-from .. import reload_modules
 
 
 class GPTOOLS_OT_reload_addon(bpy.types.Operator):
@@ -10,8 +9,18 @@ class GPTOOLS_OT_reload_addon(bpy.types.Operator):
     bl_options = {"REGISTER", "INTERNAL"}
 
     def execute(self, context):
-        # Reload all modules
-        reload_modules()
+        bpy.ops.preferences.addon_disable(module="GreaseMesh")
+
+        # Clear cached modules
+        import sys
+        to_remove = [
+            k for k in sys.modules
+            if k == "GreaseMesh" or k.startswith("GreaseMesh.")
+        ]
+        for k in to_remove:
+            del sys.modules[k]
+
+        bpy.ops.preferences.addon_enable(module="GreaseMesh")
 
         self.report({"INFO"}, "Grease Mesh addon reloaded")
         return {"FINISHED"}

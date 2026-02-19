@@ -33,7 +33,6 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.operator(
             "gptools.solid_mesh", text="Create Solid Mesh", icon="MOD_SOLIDIFY"
         )
-        box.label(text="Adjust in 'GP Mesh' modifier", icon="INFO")
 
         # Screw Mesh Section
         box = layout.box()
@@ -44,7 +43,8 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         col.prop(props, "screw_axis")
         col.prop(props, "screw_segments")
         col.separator()
-        col.operator("gptools.screw_mesh", text="Create Screw Mesh", icon="MOD_SCREW")
+        col.operator("gptools.screw_mesh", text="Screw", icon="MOD_SCREW")
+        col.operator("gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE")
 
         # Dev Section (for easy reload during development)
         box = layout.box()

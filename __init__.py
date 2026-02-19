@@ -31,9 +31,32 @@ modules = [
 
 def reload_modules():
     """Reload all addon modules for development"""
+    # Unregister everything first
+    for module in reversed(registration_modules):
+        try:
+            module.unregister()
+        except Exception:
+            pass
+
+    # Reload all modules (try both possible package names)
     for module_name in modules:
-        if module_name in sys.modules:
-            importlib.reload(sys.modules[module_name])
+        for prefix in [module_name, module_name.replace("grease_mesh.", "GreaseMesh.")]:
+            if prefix in sys.modules:
+                importlib.reload(sys.modules[prefix])
+
+    # Also reload the package __init__ submodule references
+    for mod in registration_modules:
+        try:
+            importlib.reload(mod)
+        except Exception:
+            pass
+
+    # Re-register everything
+    for module in registration_modules:
+        try:
+            module.register()
+        except Exception:
+            pass
 
 
 # Import modules
@@ -62,29 +85,12 @@ registration_modules = [
 ]
 
 
-@bpy.app.handlers.persistent
-def gp_mesh_driver_update_handler(scene, depsgraph):
-    """Update bevel segments from Geometry Nodes roundness value"""
-    from .modifiers import update_bevel_segments_from_driver
-
-    for obj in scene.objects:
-        if obj.modifiers.get("GP Mesh") and obj.modifiers.get("_GPT_Bevel"):
-            update_bevel_segments_from_driver(obj)
-
-
 def register():
     for module in registration_modules:
         module.register()
 
-    # Register driver update handler
-    bpy.app.handlers.depsgraph_update_post.append(gp_mesh_driver_update_handler)
-
 
 def unregister():
-    # Unregister driver update handler
-    if gp_mesh_driver_update_handler in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(gp_mesh_driver_update_handler)
-
     for module in reversed(registration_modules):
         module.unregister()
 

@@ -1,8 +1,6 @@
 import bpy
-import bmesh
-from mathutils import Vector
 from ..utils.conversion import get_active_grease_pencil
-from ..modifiers import add_gp_mesh_controller, update_bevel_segments_from_driver
+from ..modifiers import add_solid_mesh_modifiers
 
 
 class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
@@ -22,15 +20,16 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
+        props = context.scene.gptools
         gp_name = gp_obj.name
 
-        # Create mesh preserving Grease Pencil's 3D orientation
+        # Build edge-only mesh from GP strokes (closed loops)
         mesh_data = bpy.data.meshes.new(name="GP_Solid_Mesh")
         mesh_obj = bpy.data.objects.new(name="GP_Solid_Mesh", object_data=mesh_data)
         context.collection.objects.link(mesh_obj)
 
-        # Build flat mesh with face
-        bm = bmesh.new()
+        vertices = []
+        edges = []
 
         gp_data = gp_obj.data
         for layer in gp_data.layers:
@@ -38,66 +37,63 @@ class GPTOOLS_OT_solid_mesh(bpy.types.Operator):
                 for stroke in frame.drawing.strokes:
                     if len(stroke.points) < 3:
                         continue
+                    offset = len(vertices)
+                    for pt in stroke.points:
+                        vertices.append(tuple(pt.position))
+                    n = len(stroke.points)
+                    for i in range(n):
+                        edges.append((offset + i, offset + (i + 1) % n))
 
-                    points = [pt.position for pt in stroke.points]
-
-                    # Create vertices preserving Grease Pencil's 3D orientation
-                    verts = []
-                    for pt in points:
-                        v = bm.verts.new((pt.x, pt.y, pt.z))
-                        verts.append(v)
-
-                    # Create closed edge loop
-                    for i in range(len(verts)):
-                        v1 = verts[i]
-                        v2 = verts[(i + 1) % len(verts)]
-                        try:
-                            bm.edges.new((v1, v2))
-                        except:
-                            pass
-
-                    # Create face
-                    if len(verts) >= 3:
-                        try:
-                            bm.faces.new(verts)
-                        except:
-                            pass
-
-        # Update mesh
-        bm.normal_update()
-        bm.to_mesh(mesh_data)
-        bm.free()
-        mesh_data.update()
-
-        # Verify
-        if len(mesh_data.polygons) == 0:
-            self.report({"ERROR"}, "Failed to create faces")
+        if not vertices:
+            self.report({"ERROR"}, "No stroke points found")
+            bpy.data.objects.remove(mesh_obj, do_unlink=True)
+            bpy.data.meshes.remove(mesh_data)
             return {"CANCELLED"}
 
-        # Add GP Mesh controller with working modifiers behind the scenes
-        # User sees only the "GP Mesh" modifier with Thickness and Roundness controls
-        add_gp_mesh_controller(mesh_obj, thickness=0.1, roundness=0.3)
+        mesh_data.from_pydata(vertices, edges, [])
+        mesh_data.update()
+
+        # Fill faces using Blender's fill algorithm
+        context.view_layer.objects.active = mesh_obj
+        mesh_obj.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.dissolve_limited(angle_limit=0.000001)
+        bpy.ops.mesh.edge_face_add()
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        if len(mesh_data.polygons) == 0:
+            self.report({"ERROR"}, "Failed to create faces")
+            bpy.data.objects.remove(mesh_obj, do_unlink=True)
+            bpy.data.meshes.remove(mesh_data)
+            return {"CANCELLED"}
+
+        # Add modifier stack (Solidify + Bevel + Subdiv)
+        add_solid_mesh_modifiers(
+            mesh_obj,
+            thickness=props.solid_thickness,
+            roundness=props.solid_roundness,
+        )
 
         # Delete original GP
         if gp_name in bpy.data.objects:
-            gp_to_delete = bpy.data.objects[gp_name]
-            bpy.data.objects.remove(gp_to_delete, do_unlink=True)
+            bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
 
-        # Select mesh and make active
+        # Select result
         mesh_obj.select_set(True)
         context.view_layer.objects.active = mesh_obj
 
-        # Enter Edit Mode
-        bpy.ops.object.mode_set(mode="EDIT")
+        # Switch Properties panel to Modifiers tab
+        for area in context.screen.areas:
+            if area.type == 'PROPERTIES':
+                for space in area.spaces:
+                    if space.type == 'PROPERTIES':
+                        space.context = 'MODIFIER'
+                        break
+                break
 
-        # Select all vertices
-        bpy.ops.mesh.select_all(action="SELECT")
-
-        # Run Merge by Distance - opens popup in bottom-left
-        bpy.ops.mesh.remove_doubles()
-
-        # Stay in Edit Mode so user can see the popup and adjust
-        self.report({"INFO"}, "Adjust Merge Distance in bottom-left, then press Tab")
+        self.report({"INFO"}, "Solid mesh created. Adjust modifiers in Properties panel.")
         return {"FINISHED"}
 
 
