@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Grease Mesh",
-    "author": "Your Name",
+    "author": "Tonis",
     "version": (1, 0, 0),
     "blender": (3, 6, 0),
     "location": "View3D > N-Panel > GPTools",

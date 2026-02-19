@@ -4,10 +4,10 @@ id = "grease_mesh"
 version = "1.0.0"
 name = "Grease Mesh"
 tagline = "Easy toolbox for creating meshes from Grease Pencil"
-maintainer = "Your Name"
+maintainer = "Tonis"
 type = "add-on"
 
-website = ""
+website = "https://github.com/tonis2/GreaseMesh"
 
 tags = ["Mesh", "Grease Pencil", "Modeling"]
 
