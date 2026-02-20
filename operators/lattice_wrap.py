@@ -91,13 +91,16 @@ class GPTOOLS_OT_lattice_wrap(bpy.types.Operator):
         context.view_layer.objects.active = lat_obj
 
         # Switch Properties panel to Modifiers tab
-        for area in context.screen.areas:
-            if area.type == "PROPERTIES":
-                for space in area.spaces:
-                    if space.type == "PROPERTIES":
-                        space.context = "MODIFIER"
-                        break
-                break
+        try:
+            for area in context.screen.areas:
+                if area.type == "PROPERTIES":
+                    for space in area.spaces:
+                        if space.type == "PROPERTIES":
+                            space.context = "MODIFIER"
+                            break
+                    break
+        except TypeError:
+            pass
 
         self.report({"INFO"}, f"Lattice wrap: {source_obj.name} → {target_obj.name}")
         return {"FINISHED"}

@@ -152,13 +152,16 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
             bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
 
         # Switch Properties panel to Modifiers tab
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                for space in area.spaces:
-                    if space.type == 'PROPERTIES':
-                        space.context = 'MODIFIER'
-                        break
-                break
+        try:
+            for area in context.screen.areas:
+                if area.type == 'PROPERTIES':
+                    for space in area.spaces:
+                        if space.type == 'PROPERTIES':
+                            space.context = 'MODIFIER'
+                            break
+                    break
+        except TypeError:
+            pass
 
         self.report({"INFO"}, f"Screw mesh created (axis: {detected_axis}).")
         return {"FINISHED"}
@@ -222,13 +225,16 @@ class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
             bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
 
         # Switch Properties panel to Modifiers tab
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                for space in area.spaces:
-                    if space.type == 'PROPERTIES':
-                        space.context = 'MODIFIER'
-                        break
-                break
+        try:
+            for area in context.screen.areas:
+                if area.type == 'PROPERTIES':
+                    for space in area.spaces:
+                        if space.type == 'PROPERTIES':
+                            space.context = 'MODIFIER'
+                            break
+                    break
+        except TypeError:
+            pass
 
         self.report({"INFO"}, "Square screw mesh created.")
         return {"FINISHED"}

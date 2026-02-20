@@ -11,6 +11,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        props = context.scene.gptools
 
         # Create Section
         box = layout.box()
@@ -20,23 +21,12 @@ class GPTOOLS_PT_main(bpy.types.Panel):
             "gptools.apply_all_modifiers", text="Apply All Modifiers", icon="CHECKMARK"
         )
 
-        # Convert Section
+        # Mesh from GP Section
         box = layout.box()
-        row = box.row(align=True)
-        row.label(text="Convert", icon="IMPORT")
-        row.operator("gptools.convert_curve", text="", icon="CURVE_BEZCURVE")
-        row.operator("gptools.convert_mesh", text="", icon="MESH_DATA")
-        row.operator("gptools.convert_line", text="", icon="TRACKING_BACKWARDS_SINGLE")
-
-        # Solid Mesh Section
-        box = layout.box()
-        box.label(text="Solid Mesh", icon="MESH_CUBE")
-        props = context.scene.gptools
-        box.prop(props, "solid_round")
+        box.label(text="Mesh from GP", icon="GEOMETRY_NODES")
         col = box.column(align=True)
-        col.operator(
-            "gptools.solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY"
-        )
+        col.operator("gptools.gn_solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY")
+        col.operator("gptools.gn_tube_mesh", text="Tube Mesh", icon="MESH_CYLINDER")
 
         # Screw Mesh Section
         box = layout.box()

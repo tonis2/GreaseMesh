@@ -1,6 +1,6 @@
 # Grease Mesh
 
-A Blender addon that turns Grease Pencil drawings into 3D meshes. Draw a shape, click a button, get a mesh — with modifiers you can tweak afterwards.
+A Blender addon that turns Grease Pencil drawings into 3D meshes using Geometry Nodes. Draw a shape, click a button, get a mesh — non-destructively. Edit your strokes and the mesh updates live.
 
 Located in **3D Viewport > N-Panel > GPTools**.
 
@@ -8,17 +8,13 @@ Located in **3D Viewport > N-Panel > GPTools**.
 
 ### Create
 - **Add New Grease Pencil** — Creates a new Grease Pencil object ready for drawing.
-- **Apply All Modifiers** — Bakes all modifiers on the selected mesh into the geometry.
+- **Apply All Modifiers** — Bakes all modifiers on the selected object into the geometry.
 
-### Convert
-Quick conversions from Grease Pencil strokes:
-- **To Curve** — Bezier curve from strokes.
-- **To Mesh** — Edge mesh from strokes.
-- **To Line** — Simplified line mesh from strokes.
+### Mesh from GP (Geometry Nodes)
+Non-destructive GP-to-mesh conversion powered by Geometry Nodes. The Grease Pencil object stays editable — modify your strokes and the mesh updates automatically.
 
-### Solid Mesh
-Turn drawn shapes into extruded 3D objects with thickness.
-- **Solid Mesh** — Fills the drawn shape, adds Solidify for thickness. Toggle **Round** for beveled edges.
+- **Solid Mesh** — Fills drawn shapes and extrudes them into solid 3D objects with adjustable thickness.
+- **Tube Mesh** — Turns strokes into tubes with configurable radius and cross-section resolution.
 
 ### Screw Mesh
 Revolve a drawn profile into a 3D shape (vases, columns, turned objects).
@@ -41,10 +37,11 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 3. Select the ZIP and enable "Grease Mesh"
 
 ## Tips
-- **Solid Mesh**: Draw closed shapes for best results. Toggle **Round** for smooth edges.
+- **Solid Mesh**: Draw closed shapes for best results. Adjust thickness in the modifier panel.
+- **Tube Mesh**: Works great with open strokes. Adjust radius and resolution in the modifier panel.
 - **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
-- All operators leave modifiers non-destructive — tweak settings in the Properties > Modifiers panel after creation.
+- GN-based operators are fully non-destructive — tweak all settings in the Properties > Modifiers panel after creation.
 
 ## License
 GPL-3.0-or-later

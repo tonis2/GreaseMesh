@@ -1,8 +1,70 @@
 import bpy
 
 
+def _apply_gp_modifiers(context, gp_obj):
+    """Extract evaluated mesh from a GP object's GN modifiers via depsgraph."""
+    if context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    depsgraph = context.evaluated_depsgraph_get()
+
+    # GN modifiers on GP objects create mesh instances in the depsgraph.
+    # Extract vertex/face data before any scene changes invalidate references.
+    verts = []
+    faces = []
+    smooth_flags = []
+    eval_inst_obj = None
+
+    for inst in depsgraph.object_instances:
+        if inst.object.original == gp_obj and inst.is_instance:
+            eval_inst_obj = inst.object
+            mesh_data = eval_inst_obj.to_mesh()
+            if mesh_data and len(mesh_data.vertices) > 0:
+                verts = [v.co[:] for v in mesh_data.vertices]
+                faces = [list(p.vertices) for p in mesh_data.polygons]
+                smooth_flags = [p.use_smooth for p in mesh_data.polygons]
+            eval_inst_obj.to_mesh_clear()
+            break
+
+    if not verts:
+        return None
+
+    # Collect GP object properties before removing it
+    name = gp_obj.name
+    matrix = gp_obj.matrix_world.copy()
+    collections = list(gp_obj.users_collection)
+    materials = list(gp_obj.data.materials)
+
+    # Remove the original GP object
+    bpy.data.objects.remove(gp_obj, do_unlink=True)
+
+    # Build a standalone mesh from the extracted data
+    new_mesh = bpy.data.meshes.new(name=name)
+    new_mesh.from_pydata(verts, [], faces)
+    new_mesh.update()
+
+    for flag, poly in zip(smooth_flags, new_mesh.polygons):
+        poly.use_smooth = flag
+
+    # Create new mesh object at the same transform
+    new_obj = bpy.data.objects.new(name=name, object_data=new_mesh)
+    for col in collections:
+        col.objects.link(new_obj)
+    new_obj.matrix_world = matrix
+
+    for mat in materials:
+        new_obj.data.materials.append(mat)
+
+    # Select the new object
+    context.view_layer.objects.active = new_obj
+    new_obj.select_set(True)
+
+    return new_obj
+
+
 class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
-    """Apply all modifiers on the active object"""
+    """Apply all modifiers on the active object. For Grease Pencil objects
+    with geometry-changing modifiers, converts to mesh."""
 
     bl_idname = "gptools.apply_all_modifiers"
     bl_label = "Apply All Modifiers"
@@ -11,12 +73,26 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == "MESH" and len(obj.modifiers) > 0
+        if obj is None or len(obj.modifiers) == 0:
+            return False
+        return obj.type in {"MESH", "GREASEPENCIL"}
 
     def execute(self, context):
         obj = context.active_object
-        count = 0
 
+        if obj.type == "GREASEPENCIL":
+            name = obj.name
+            new_obj = _apply_gp_modifiers(context, obj)
+            if new_obj is None:
+                self.report({"ERROR"}, "No mesh geometry produced by modifiers.")
+                return {"CANCELLED"}
+            self.report(
+                {"INFO"},
+                f"Converted '{name}' to mesh ({len(new_obj.data.vertices)} verts).",
+            )
+            return {"FINISHED"}
+
+        count = 0
         for modifier in list(obj.modifiers):
             try:
                 bpy.ops.object.modifier_apply(modifier=modifier.name)
