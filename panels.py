@@ -27,6 +27,8 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         col = box.column(align=True)
         col.operator("gptools.gn_solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY")
         col.operator("gptools.gn_tube_mesh", text="Tube Mesh", icon="MESH_CYLINDER")
+        col.operator("gptools.gn_mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR")
+        col.operator("gptools.gn_path_mesh", text="Path Mesh", icon="MOD_CURVE")
 
         # Screw Mesh Section
         box = layout.box()
