@@ -7,6 +7,11 @@ PROFILE_LAYER_NAME = "Profile"
 PATH_LAYER_NAME = "Path"
 
 
+def _layer_has_strokes(layer):
+    """Check if a GP layer has any drawn strokes."""
+    return any(len(f.drawing.strokes) > 0 for f in layer.frames)
+
+
 def ensure_gp_layers(gp_obj):
     """Ensure the GP object has 'Profile' and 'Path' layers with drawable frames.
 
@@ -22,8 +27,7 @@ def ensure_gp_layers(gp_obj):
     # If no Profile/Path layers yet, adopt the first layer with strokes as Path
     if not has_profile and not has_path:
         for layer in gp_data.layers:
-            has_strokes = any(len(f.drawing.strokes) > 0 for f in layer.frames)
-            if has_strokes:
+            if _layer_has_strokes(layer):
                 layer.name = PATH_LAYER_NAME
                 break
 
@@ -36,158 +40,167 @@ def ensure_gp_layers(gp_obj):
             layer.frames.new(scene_frame)
 
 
+def _build_interface(ng):
+    """Create the modifier panel sockets."""
+    ng.interface.new_socket(
+        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry',
+    )
+
+    s = ng.interface.new_socket(
+        name="Profile Resolution", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    s.default_value, s.min_value, s.max_value = 32, 3, 256
+
+    s = ng.interface.new_socket(
+        name="Path Resolution", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    s.default_value, s.min_value, s.max_value = 64, 3, 512
+
+    s = ng.interface.new_socket(
+        name="Fill Caps", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    s.default_value = True
+
+    ng.interface.new_socket(
+        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
+    )
+
+
+def _add_gp_branch(ng, link, group_in, layer_name, res_socket_name, cyclic, x, y):
+    """Build a GP → Curves → Resample (→ Set Cyclic) branch. Returns curve output."""
+    sel = ng.nodes.new('GeometryNodeInputNamedLayerSelection')
+    sel.location = (x, y)
+    sel.inputs['Name'].default_value = layer_name
+
+    gp_to_curves = ng.nodes.new('GeometryNodeGreasePencilToCurves')
+    gp_to_curves.location = (x + 200, y)
+    gp_to_curves.inputs['Layers as Instances'].default_value = False
+
+    resample = ng.nodes.new('GeometryNodeResampleCurve')
+    resample.location = (x + 400, y)
+
+    link(group_in.outputs['Geometry'], gp_to_curves.inputs['Grease Pencil'])
+    link(sel.outputs['Selection'], gp_to_curves.inputs['Selection'])
+    link(gp_to_curves.outputs['Curves'], resample.inputs['Curve'])
+    link(group_in.outputs[res_socket_name], resample.inputs['Count'])
+
+    out = resample.outputs['Curve']
+
+    if cyclic:
+        set_cyclic = ng.nodes.new('GeometryNodeSetSplineCyclic')
+        set_cyclic.location = (x + 600, y)
+        set_cyclic.inputs['Cyclic'].default_value = True
+        link(out, set_cyclic.inputs['Curve'])
+        out = set_cyclic.outputs['Curve']
+
+    return out
+
+
+def _add_center_offset(ng, link, curve_out, x, y):
+    """Center geometry at origin using bbox. Returns Set Position output."""
+    bbox = ng.nodes.new('GeometryNodeBoundBox')
+    bbox.location = (x, y - 200)
+
+    vec_add = ng.nodes.new('ShaderNodeVectorMath')
+    vec_add.location = (x + 200, y - 200)
+    vec_add.operation = 'ADD'
+
+    vec_half = ng.nodes.new('ShaderNodeVectorMath')
+    vec_half.location = (x + 400, y - 200)
+    vec_half.operation = 'SCALE'
+    vec_half.inputs['Scale'].default_value = 0.5
+
+    vec_neg = ng.nodes.new('ShaderNodeVectorMath')
+    vec_neg.location = (x + 600, y - 200)
+    vec_neg.operation = 'SCALE'
+    vec_neg.inputs['Scale'].default_value = -1.0
+
+    pos = ng.nodes.new('GeometryNodeInputPosition')
+    pos.location = (x + 400, y + 100)
+
+    add_offset = ng.nodes.new('ShaderNodeVectorMath')
+    add_offset.location = (x + 800, y + 100)
+    add_offset.operation = 'ADD'
+
+    set_pos = ng.nodes.new('GeometryNodeSetPosition')
+    set_pos.location = (x + 1000, y)
+
+    link(curve_out, bbox.inputs['Geometry'])
+    link(bbox.outputs['Min'], vec_add.inputs[0])
+    link(bbox.outputs['Max'], vec_add.inputs[1])
+    link(vec_add.outputs['Vector'], vec_half.inputs[0])
+    link(vec_half.outputs['Vector'], vec_neg.inputs[0])
+    link(pos.outputs['Position'], add_offset.inputs[0])
+    link(vec_neg.outputs['Vector'], add_offset.inputs[1])
+    link(curve_out, set_pos.inputs['Geometry'])
+    link(add_offset.outputs['Vector'], set_pos.inputs['Position'])
+
+    return set_pos.outputs['Geometry']
+
+
 def get_or_create_path_node_group():
     """Get existing or build the Path Mesh geometry node group.
 
     Pipeline:
-      GP → Named Layer Selection("Profile") → GP to Curves → Resample → Set Cyclic → profile
-      GP → Named Layer Selection("Path")    → GP to Curves → Resample              → path
-      Curve to Mesh(path, profile, Fill Caps) → Shade Smooth → Output
+      Profile: GP → Named Layer Selection → GP to Curves → Resample → Cyclic → Center
+      Path:    GP → Named Layer Selection → GP to Curves → Resample
+      Curve to Mesh(path, centered_profile, Fill Caps) → Shade Smooth → Output
     """
     ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
     if ng is not None:
         return ng
 
     ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
+    _build_interface(ng)
 
-    # Interface sockets
-    ng.interface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    link = ng.links.new
 
-    profile_res_sock = ng.interface.new_socket(
-        name="Profile Resolution", in_out='INPUT', socket_type='NodeSocketInt',
-    )
-    profile_res_sock.default_value = 32
-    profile_res_sock.min_value = 3
-    profile_res_sock.max_value = 256
-
-    path_res_sock = ng.interface.new_socket(
-        name="Path Resolution", in_out='INPUT', socket_type='NodeSocketInt',
-    )
-    path_res_sock.default_value = 64
-    path_res_sock.min_value = 3
-    path_res_sock.max_value = 512
-
-    caps_sock = ng.interface.new_socket(
-        name="Fill Caps", in_out='INPUT', socket_type='NodeSocketBool',
-    )
-    caps_sock.default_value = True
-
-    ng.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
-
-    # --- Nodes ---
     group_in = ng.nodes.new('NodeGroupInput')
     group_in.location = (-1000, 0)
 
-    # === Profile branch (top) ===
-    x_p = -800
-    profile_sel = ng.nodes.new('GeometryNodeInputNamedLayerSelection')
-    profile_sel.location = (x_p, 200)
-    profile_sel.inputs['Name'].default_value = PROFILE_LAYER_NAME
+    # Profile branch (cyclic, centered)
+    profile_out = _add_gp_branch(
+        ng, link, group_in, PROFILE_LAYER_NAME, 'Profile Resolution',
+        cyclic=True, x=-800, y=200,
+    )
+    centered_profile = _add_center_offset(ng, link, profile_out, x=0, y=200)
 
-    x_p += 200
-    profile_gp_to_curves = ng.nodes.new('GeometryNodeGreasePencilToCurves')
-    profile_gp_to_curves.location = (x_p, 200)
-    profile_gp_to_curves.inputs['Layers as Instances'].default_value = False
+    # Path branch (open curve)
+    path_out = _add_gp_branch(
+        ng, link, group_in, PATH_LAYER_NAME, 'Path Resolution',
+        cyclic=False, x=-800, y=-200,
+    )
 
-    x_p += 200
-    profile_resample = ng.nodes.new('GeometryNodeResampleCurve')
-    profile_resample.location = (x_p, 200)
-
-    x_p += 200
-    profile_cyclic = ng.nodes.new('GeometryNodeSetSplineCyclic')
-    profile_cyclic.location = (x_p, 200)
-    profile_cyclic.inputs['Cyclic'].default_value = True
-
-    # Center the profile: compute bounding box center, subtract from positions
-    x_p += 200
-    profile_bbox = ng.nodes.new('GeometryNodeBoundBox')
-    profile_bbox.location = (x_p, 0)
-
-    # center = (Min + Max) / 2
-    x_p += 200
-    vec_add = ng.nodes.new('ShaderNodeVectorMath')
-    vec_add.location = (x_p, -50)
-    vec_add.operation = 'ADD'
-
-    vec_scale = ng.nodes.new('ShaderNodeVectorMath')
-    vec_scale.location = (x_p + 200, -50)
-    vec_scale.operation = 'SCALE'
-    vec_scale.inputs['Scale'].default_value = 0.5
-
-    # offset = -center
-    vec_negate = ng.nodes.new('ShaderNodeVectorMath')
-    vec_negate.location = (x_p + 400, -50)
-    vec_negate.operation = 'SCALE'
-    vec_negate.inputs['Scale'].default_value = -1.0
-
-    # Apply offset to profile positions
-    profile_pos = ng.nodes.new('GeometryNodeInputPosition')
-    profile_pos.location = (x_p + 200, 300)
-
-    vec_add_offset = ng.nodes.new('ShaderNodeVectorMath')
-    vec_add_offset.location = (x_p + 600, 300)
-    vec_add_offset.operation = 'ADD'
-
-    profile_set_pos = ng.nodes.new('GeometryNodeSetPosition')
-    profile_set_pos.location = (x_p + 800, 200)
-
-    # === Path branch (bottom) ===
-    path_sel = ng.nodes.new('GeometryNodeInputNamedLayerSelection')
-    path_sel.location = (-800, -200)
-    path_sel.inputs['Name'].default_value = PATH_LAYER_NAME
-
-    path_gp_to_curves = ng.nodes.new('GeometryNodeGreasePencilToCurves')
-    path_gp_to_curves.location = (-600, -200)
-    path_gp_to_curves.inputs['Layers as Instances'].default_value = False
-
-    path_resample = ng.nodes.new('GeometryNodeResampleCurve')
-    path_resample.location = (-400, -200)
-
-    # === Sweep ===
+    # Sweep profile along path
     curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
-    curve_to_mesh.location = (x_p + 1000, 0)
+    curve_to_mesh.location = (1200, 0)
 
     shade = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade.location = (x_p + 1200, 0)
+    shade.location = (1400, 0)
 
     group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (x_p + 1400, 0)
+    group_out.location = (1600, 0)
 
-    # --- Links ---
-    link = ng.links.new
-
-    # Profile branch: GP → Curves → Resample → Cyclic
-    link(group_in.outputs['Geometry'], profile_gp_to_curves.inputs['Grease Pencil'])
-    link(profile_sel.outputs['Selection'], profile_gp_to_curves.inputs['Selection'])
-    link(profile_gp_to_curves.outputs['Curves'], profile_resample.inputs['Curve'])
-    link(group_in.outputs['Profile Resolution'], profile_resample.inputs['Count'])
-    link(profile_resample.outputs['Curve'], profile_cyclic.inputs['Curve'])
-
-    # Center profile: bbox → center → negate → offset positions
-    link(profile_cyclic.outputs['Curve'], profile_bbox.inputs['Geometry'])
-    link(profile_bbox.outputs['Min'], vec_add.inputs[0])
-    link(profile_bbox.outputs['Max'], vec_add.inputs[1])
-    link(vec_add.outputs['Vector'], vec_scale.inputs[0])
-    link(vec_scale.outputs['Vector'], vec_negate.inputs[0])
-    link(profile_pos.outputs['Position'], vec_add_offset.inputs[0])
-    link(vec_negate.outputs['Vector'], vec_add_offset.inputs[1])
-    link(profile_cyclic.outputs['Curve'], profile_set_pos.inputs['Geometry'])
-    link(vec_add_offset.outputs['Vector'], profile_set_pos.inputs['Position'])
-
-    # Path branch
-    link(group_in.outputs['Geometry'], path_gp_to_curves.inputs['Grease Pencil'])
-    link(path_sel.outputs['Selection'], path_gp_to_curves.inputs['Selection'])
-    link(path_gp_to_curves.outputs['Curves'], path_resample.inputs['Curve'])
-    link(group_in.outputs['Path Resolution'], path_resample.inputs['Count'])
-
-    # Sweep centered profile along path
-    link(path_resample.outputs['Curve'], curve_to_mesh.inputs['Curve'])
-    link(profile_set_pos.outputs['Geometry'], curve_to_mesh.inputs['Profile Curve'])
+    link(path_out, curve_to_mesh.inputs['Curve'])
+    link(centered_profile, curve_to_mesh.inputs['Profile Curve'])
     link(group_in.outputs['Fill Caps'], curve_to_mesh.inputs['Fill Caps'])
     link(curve_to_mesh.outputs['Mesh'], shade.inputs['Mesh'])
     link(shade.outputs['Mesh'], group_out.inputs['Geometry'])
 
     return ng
+
+
+def _show_properties_tab(context, tab):
+    """Switch Properties editor to a specific tab."""
+    try:
+        for area in context.screen.areas:
+            if area.type == 'PROPERTIES':
+                for space in area.spaces:
+                    if space.type == 'PROPERTIES':
+                        space.context = tab
+                        return
+    except TypeError:
+        pass
 
 
 class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
@@ -201,85 +214,52 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
     def poll(cls, context):
         return get_active_grease_pencil(context) is not None
 
-    @staticmethod
-    def _show_layers_panel(context):
-        """Switch Properties editor to Object Data tab to show GP layers."""
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'DATA'
-                            return
-        except TypeError:
-            pass
-
     def execute(self, context):
         gp_obj = get_active_grease_pencil(context)
         if not gp_obj:
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        # Ensure Profile and Path layers exist
         ensure_gp_layers(gp_obj)
 
-        # Check if either layer has drawings
         gp_data = gp_obj.data
-        has_profile = False
-        has_path = False
-        for layer in gp_data.layers:
-            if layer.name == PROFILE_LAYER_NAME:
-                has_profile = any(len(f.drawing.strokes) > 0 for f in layer.frames)
-            elif layer.name == PATH_LAYER_NAME:
-                has_path = any(len(f.drawing.strokes) > 0 for f in layer.frames)
+        profile = gp_data.layers.get(PROFILE_LAYER_NAME)
+        path = gp_data.layers.get(PATH_LAYER_NAME)
+        has_profile = profile and _layer_has_strokes(profile)
+        has_path = path and _layer_has_strokes(path)
 
         if not has_profile and not has_path:
-            self.report(
-                {"WARNING"},
-                "Draw a line first, then click Path Mesh again.",
-            )
+            self.report({"WARNING"}, "Draw a line first, then click Path Mesh again.")
             return {"CANCELLED"}
 
         if not has_profile:
-            # Show layers panel so user can see Profile/Path layers
-            self._show_layers_panel(context)
-            # Set Profile as active layer so user can draw on it
-            gp_data.layers.active = gp_data.layers.get(PROFILE_LAYER_NAME)
-            self.report({"WARNING"}, "Now draw the cross-section on the 'Profile' layer, then click Path Mesh again.")
+            _show_properties_tab(context, 'DATA')
+            gp_data.layers.active = profile
+            self.report(
+                {"WARNING"},
+                "Now draw the cross-section on the 'Profile' layer, then click Path Mesh again.",
+            )
             return {"CANCELLED"}
 
         if not has_path:
-            self._show_layers_panel(context)
-            gp_data.layers.active = gp_data.layers.get(PATH_LAYER_NAME)
+            _show_properties_tab(context, 'DATA')
+            gp_data.layers.active = path
             self.report({"WARNING"}, "No strokes on 'Path' layer. Draw your sweep line there.")
             return {"CANCELLED"}
 
-        node_group = get_or_create_path_node_group()
-
         mod = gp_obj.modifiers.new(name="PathMesh", type='NODES')
-        mod.node_group = node_group
+        mod.node_group = get_or_create_path_node_group()
 
         context.view_layer.objects.active = gp_obj
         gp_obj.select_set(True)
 
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'MODIFIER'
-                            break
-                    break
-        except TypeError:
-            pass
+        _show_properties_tab(context, 'MODIFIER')
 
         self.report({"INFO"}, "Path mesh GN modifier added.")
         return {"FINISHED"}
 
 
-classes = [
-    GPTOOLS_OT_gn_path_mesh,
-]
+classes = [GPTOOLS_OT_gn_path_mesh]
 
 
 def register():
