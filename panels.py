@@ -30,6 +30,11 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         col.operator("gptools.gn_mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR")
         col.operator("gptools.gn_path_mesh", text="Path Mesh", icon="MOD_CURVE")
 
+        # Boolean Section
+        box = layout.box()
+        box.label(text="Boolean", icon="MOD_BOOLEAN")
+        box.operator("gptools.bool_cut", text="Bool Cut", icon="MOD_BOOLEAN")
+
         # Screw Mesh Section
         box = layout.box()
         box.label(text="Screw Mesh", icon="MOD_SCREW")
