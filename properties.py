@@ -20,12 +20,6 @@ class GPToolsProperties(bpy.types.PropertyGroup):
         max=32,
     )
 
-    # Stamp Scatter settings
-    stamp_collection: bpy.props.PointerProperty(
-        name="Asset Collection",
-        description="Collection of assets to scatter on GP marks",
-        type=bpy.types.Collection,
-    )
 
 
 classes = [

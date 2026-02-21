@@ -3,22 +3,26 @@ import math
 from mathutils import Vector
 from ..utils.conversion import get_active_grease_pencil
 
-NODE_GROUP_NAME = "GreaseMesh_StampScatter"
+SCATTER_NODE_GROUP = "GreaseMesh_StampScatter"
 
 
-def _compute_x_mark_centers(gp_obj, merge_distance):
+def _compute_x_mark_centers(gp_obj, merge_distance, layer_name=None):
     """Compute AABB centers of X marks from GP strokes.
 
     1. Get the centroid of each stroke (world space)
     2. Group nearby centroids within merge_distance (X = 2 close strokes)
     3. For each group, compute AABB of ALL points across its strokes
     4. Return the AABB center of each group
+
+    If layer_name is given, only process strokes on that layer.
     """
     gp_matrix = gp_obj.matrix_world
 
     # Collect per-stroke data: centroid + all world-space points
     strokes_data = []
     for layer in gp_obj.data.layers:
+        if layer_name is not None and layer.name != layer_name:
+            continue
         for frame in layer.frames:
             for stroke in frame.drawing.strokes:
                 if len(stroke.points) == 0:
@@ -67,28 +71,28 @@ def _compute_x_mark_centers(gp_obj, merge_distance):
     return centers
 
 
-def get_or_create_instance_node_group():
-    """GN group that instances a collection at each vertex of the input mesh.
+def get_or_create_scatter_node_group():
+    """Reusable GN sub-group that instances a collection at input points.
 
     Pipeline:
-      Mesh vertices → InstanceOnPoints (random pick from collection)
+      Points → CollectionInfo → InstanceOnPoints (random pick)
         → RotateInstances (random Z) → ScaleInstances → Output
+
+    Cached by name — shared across all scatter operations.
     """
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
+    ng = bpy.data.node_groups.get(SCATTER_NODE_GROUP)
     if ng is not None:
         return ng
 
-    ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
+    ng = bpy.data.node_groups.new(name=SCATTER_NODE_GROUP, type='GeometryNodeTree')
 
-    # Interface sockets
+    # --- Interface ---
     ng.interface.new_socket(
-        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry',
+        name="Points", in_out='INPUT', socket_type='NodeSocketGeometry',
     )
-
     ng.interface.new_socket(
         name="Collection", in_out='INPUT', socket_type='NodeSocketCollection',
     )
-
     scale_sock = ng.interface.new_socket(
         name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
     )
@@ -104,7 +108,7 @@ def get_or_create_instance_node_group():
     seed_sock.max_value = 10000
 
     ng.interface.new_socket(
-        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
+        name="Instances", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
 
     # --- Nodes ---
@@ -129,7 +133,7 @@ def get_or_create_instance_node_group():
     rand_pick.location = (x + 100, -200)
     rand_pick.data_type = 'INT'
     rand_pick.inputs[4].default_value = 0      # Min (INT)
-    rand_pick.inputs[5].default_value = 99999  # Max (INT, wraps via modulo)
+    rand_pick.inputs[5].default_value = 99999  # Max (INT)
 
     # Instance on Points
     x += 200
@@ -183,8 +187,8 @@ def get_or_create_instance_node_group():
     link(index_node.outputs['Index'], rand_pick.inputs['ID'])
     link(group_in.outputs['Seed'], rand_pick.inputs['Seed'])
 
-    # Instance on Points (input geometry vertices = scatter points)
-    link(group_in.outputs['Geometry'], inst_on_pts.inputs['Points'])
+    # Instance on Points
+    link(group_in.outputs['Points'], inst_on_pts.inputs['Points'])
     link(coll_info.outputs['Instances'], inst_on_pts.inputs['Instance'])
     link(rand_pick.outputs[2], inst_on_pts.inputs['Instance Index'])
 
@@ -206,7 +210,117 @@ def get_or_create_instance_node_group():
     link(combine_scale.outputs['Vector'], scale_inst.inputs['Scale'])
 
     # Output
-    link(scale_inst.outputs['Instances'], group_out.inputs['Geometry'])
+    link(scale_inst.outputs['Instances'], group_out.inputs['Instances'])
+
+    return ng
+
+
+def _build_wrapper_node_tree(gp_name, layer_names):
+    """Build a per-object wrapper node tree that filters by stamp_layer
+    and routes each layer's points to a GreaseMesh_StampScatter sub-group.
+
+    Wrapper interface:
+      Geometry (in) | {layer_name} Collection (in, per layer) |
+      Scale (in) | Seed (in) | Geometry (out)
+    """
+    tree_name = f"StampScatter_{gp_name}"
+
+    # Remove existing wrapper with same name
+    existing = bpy.data.node_groups.get(tree_name)
+    if existing is not None:
+        bpy.data.node_groups.remove(existing)
+
+    ng = bpy.data.node_groups.new(name=tree_name, type='GeometryNodeTree')
+
+    # --- Interface ---
+    ng.interface.new_socket(
+        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry',
+    )
+    ng.interface.new_socket(
+        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
+    )
+
+    for layer_name in layer_names:
+        ng.interface.new_socket(
+            name=layer_name, in_out='INPUT', socket_type='NodeSocketCollection',
+        )
+
+    scale_sock = ng.interface.new_socket(
+        name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    scale_sock.default_value = 1.0
+    scale_sock.min_value = 0.01
+    scale_sock.max_value = 10.0
+
+    seed_sock = ng.interface.new_socket(
+        name="Seed", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    seed_sock.default_value = 0
+    seed_sock.min_value = 0
+    seed_sock.max_value = 10000
+
+    # --- Shared nodes ---
+    x_start = -800
+    group_in = ng.nodes.new('NodeGroupInput')
+    group_in.location = (x_start, 0)
+
+    group_out = ng.nodes.new('NodeGroupOutput')
+    group_out.location = (1200, 0)
+
+    # Named attribute: stamp_layer (INT)
+    named_attr = ng.nodes.new('GeometryNodeInputNamedAttribute')
+    named_attr.location = (x_start + 200, -200)
+    named_attr.data_type = 'INT'
+    named_attr.inputs['Name'].default_value = "stamp_layer"
+
+    # Join Geometry — collects all branch outputs
+    join_geo = ng.nodes.new('GeometryNodeJoinGeometry')
+    join_geo.location = (1000, 0)
+
+    link = ng.links.new
+    link(join_geo.outputs['Geometry'], group_out.inputs['Geometry'])
+
+    # Ensure the reusable sub-group exists
+    scatter_ng = get_or_create_scatter_node_group()
+
+    # --- Per-layer branches ---
+    y_offset = 0
+    for layer_idx, layer_name in enumerate(layer_names):
+        bx = -400
+        by = y_offset
+
+        # Compare: stamp_layer == layer_idx
+        compare = ng.nodes.new('FunctionNodeCompare')
+        compare.location = (bx, by)
+        compare.data_type = 'INT'
+        compare.operation = 'EQUAL'
+        compare.inputs['B'].default_value = layer_idx
+        link(named_attr.outputs['Attribute'], compare.inputs['A'])
+
+        # Separate Geometry
+        bx += 200
+        sep_geo = ng.nodes.new('GeometryNodeSeparateGeometry')
+        sep_geo.location = (bx, by)
+        link(group_in.outputs['Geometry'], sep_geo.inputs['Geometry'])
+        link(compare.outputs['Result'], sep_geo.inputs['Selection'])
+
+        # Sub-group: GreaseMesh_StampScatter
+        bx += 200
+        sub_group = ng.nodes.new('GeometryNodeGroup')
+        sub_group.location = (bx, by)
+        sub_group.node_tree = scatter_ng
+        sub_group.label = layer_name
+
+        # Wire sub-group inputs
+        link(sep_geo.outputs['Selection'], sub_group.inputs['Points'])
+        link(group_in.outputs[layer_name], sub_group.inputs['Collection'])
+        link(group_in.outputs['Scale'], sub_group.inputs['Scale'])
+        link(group_in.outputs['Seed'], sub_group.inputs['Seed'])
+
+        # Wire sub-group output to join
+        link(sub_group.outputs['Instances'], join_geo.inputs['Geometry'])
+
+        y_offset -= 400
 
     return ng
 
@@ -214,8 +328,10 @@ def get_or_create_instance_node_group():
 class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
     """Scatter collection assets at GP X-mark locations on a surface.
 
-    Computes AABB center of each X mark, creates a scatter mesh,
-    and adds a non-destructive GN instancing modifier.
+    Computes AABB centers per layer, creates a scatter mesh with stamp_layer
+    attribute, and adds a GN modifier with per-layer Collection inputs.
+    The instancing logic lives in a reusable GreaseMesh_StampScatter sub-group
+    visible in the GN editor.
     """
 
     bl_idname = "gptools.stamp_scatter"
@@ -227,45 +343,62 @@ class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
         gp = get_active_grease_pencil(context)
         if gp is None:
             return False
-        if not context.scene.gptools.stamp_collection:
-            return False
-        return True
+        return any(
+            len(f.drawing.strokes) > 0
+            for layer in gp.data.layers
+            for f in layer.frames
+        )
 
     def execute(self, context):
-        props = context.scene.gptools
         gp_obj = get_active_grease_pencil(context)
 
         if not gp_obj:
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        coll = props.stamp_collection
-        if not coll:
-            self.report({"ERROR"}, "Please select an asset collection")
-            return {"CANCELLED"}
+        # Collect layers that have strokes, compute centers per layer
+        layers_data = []
+        for layer in gp_obj.data.layers:
+            centers = _compute_x_mark_centers(gp_obj, 2.0, layer_name=layer.name)
+            if centers:
+                layers_data.append((layer.name, centers))
 
-        # Compute X mark centers using AABB (merge distance = 2.0)
-        centers = _compute_x_mark_centers(gp_obj, 2.0)
-        if not centers:
+        if not layers_data:
             self.report({"ERROR"}, "No marks found in Grease Pencil strokes")
             return {"CANCELLED"}
 
-        # Create a scatter mesh with one vertex per X mark center
-        mesh = bpy.data.meshes.new("StampScatter")
-        mesh.from_pydata([c[:] for c in centers], [], [])
+        # Build scatter mesh with all vertices + stamp_layer attribute
+        all_verts = []
+        layer_indices = []
+        for idx, (layer_name, centers) in enumerate(layers_data):
+            for c in centers:
+                all_verts.append(c[:])
+                layer_indices.append(idx)
+
+        mesh = bpy.data.meshes.new(f"StampScatter_{gp_obj.name}")
+        mesh.from_pydata(all_verts, [], [])
         mesh.update()
 
-        scatter_obj = bpy.data.objects.new("StampScatter", mesh)
+        attr = mesh.attributes.new(name="stamp_layer", type='INT', domain='POINT')
+        for i, val in enumerate(layer_indices):
+            attr.data[i].value = val
+
+        scatter_obj = bpy.data.objects.new(f"StampScatter_{gp_obj.name}", mesh)
         for col in gp_obj.users_collection:
             col.objects.link(scatter_obj)
 
-        # Add the instancing GN modifier
-        node_group = get_or_create_instance_node_group()
+        # Build wrapper node tree and add modifier
+        layer_names = [name for name, _ in layers_data]
+        wrapper_ng = _build_wrapper_node_tree(gp_obj.name, layer_names)
         mod = scatter_obj.modifiers.new(name="StampScatter", type='NODES')
-        mod.node_group = node_group
+        mod.node_group = wrapper_ng
 
+        # Auto-assign collections that match layer names
         items = mod.node_group.interface.items_tree
-        mod[items['Collection'].identifier] = coll
+        for layer_name in layer_names:
+            coll = bpy.data.collections.get(layer_name)
+            if coll is not None:
+                mod[items[layer_name].identifier] = coll
 
         # Select the scatter object
         context.view_layer.objects.active = scatter_obj
@@ -284,9 +417,13 @@ class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
         except TypeError:
             pass
 
+        total = len(all_verts)
+        layer_info = ", ".join(
+            f"{name} ({len(centers)})" for name, centers in layers_data
+        )
         self.report(
             {"INFO"},
-            f"Scattered {len(centers)} instance(s) — edit settings in Modifiers panel",
+            f"Scattered {total} instance(s) across {len(layers_data)} layer(s): {layer_info}",
         )
         return {"FINISHED"}
 

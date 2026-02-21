@@ -62,6 +62,45 @@ def _apply_gp_modifiers(context, gp_obj):
     return new_obj
 
 
+def _apply_mesh_via_depsgraph(context, mesh_obj):
+    """Apply GN modifiers that output instances by making instances real,
+    then joining into a single mesh."""
+    if context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Ensure only our object is selected
+    bpy.ops.object.select_all(action='DESELECT')
+    context.view_layer.objects.active = mesh_obj
+    mesh_obj.select_set(True)
+
+    # Make instances real — converts GN instances to actual objects
+    bpy.ops.object.duplicates_make_real()
+
+    # Collect all newly created objects (they'll be selected)
+    realized = [o for o in context.selected_objects if o != mesh_obj]
+
+    if not realized:
+        return None
+
+    # Delete the original scatter mesh (just vertices, no materials)
+    name = mesh_obj.name
+    collections = list(mesh_obj.users_collection)
+    bpy.data.objects.remove(mesh_obj, do_unlink=True)
+
+    # Select all realized objects, join with one as active
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in realized:
+        o.select_set(True)
+    active = realized[0]
+    context.view_layer.objects.active = active
+
+    if len(realized) > 1:
+        bpy.ops.object.join()
+
+    active.name = name
+    return active
+
+
 class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
     """Apply all modifiers on the active object. For Grease Pencil objects
     with geometry-changing modifiers, converts to mesh."""
@@ -97,8 +136,22 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
             try:
                 bpy.ops.object.modifier_apply(modifier=modifier.name)
                 count += 1
-            except Exception as e:
-                self.report({"WARNING"}, f"Could not apply '{modifier.name}': {e}")
+            except RuntimeError:
+                # GN modifiers that output instances can't be applied directly.
+                # Use depsgraph to extract the evaluated mesh instead.
+                new_obj = _apply_mesh_via_depsgraph(context, obj)
+                if new_obj is not None:
+                    count = len(obj.modifiers)
+                    self.report(
+                        {"INFO"},
+                        f"Applied {count} modifier(s) via depsgraph"
+                        f" ({len(new_obj.data.vertices)} verts).",
+                    )
+                    return {"FINISHED"}
+                self.report(
+                    {"WARNING"},
+                    f"Could not apply '{modifier.name}'",
+                )
 
         self.report({"INFO"}, f"Applied {count} modifier(s)")
         return {"FINISHED"}

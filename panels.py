@@ -46,9 +46,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Stamp Scatter Section
         box = layout.box()
         box.label(text="Stamp Scatter", icon="OUTLINER_OB_POINTCLOUD")
-        col = box.column(align=True)
-        col.prop(props, "stamp_collection")
-        col.operator(
+        box.operator(
             "gptools.stamp_scatter",
             text="Scatter on Surface",
             icon="OUTLINER_OB_POINTCLOUD",
