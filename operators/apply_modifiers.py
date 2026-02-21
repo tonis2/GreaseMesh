@@ -62,43 +62,71 @@ def _apply_gp_modifiers(context, gp_obj):
     return new_obj
 
 
-def _apply_mesh_via_depsgraph(context, mesh_obj):
-    """Apply GN modifiers that output instances by making instances real,
-    then joining into a single mesh."""
+def _apply_scatter_modifier(context, scatter_obj):
+    """Apply a StampScatter GN modifier by reading the exact instances
+    from the depsgraph (matching what's displayed in viewport) and
+    duplicating them as real objects."""
     if context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
-    # Ensure only our object is selected
-    bpy.ops.object.select_all(action='DESELECT')
-    context.view_layer.objects.active = mesh_obj
-    mesh_obj.select_set(True)
+    depsgraph = context.evaluated_depsgraph_get()
 
-    # Make instances real — converts GN instances to actual objects
-    bpy.ops.object.duplicates_make_real()
+    # Collect all GN instances belonging to this scatter object.
+    # Deduplicate by position — collection instances expand into
+    # parent Empty + child Mesh at the same location in the depsgraph.
+    seen_positions = {}
+    for inst in depsgraph.object_instances:
+        if not inst.is_instance:
+            continue
+        if inst.parent is None or inst.parent.original != scatter_obj:
+            continue
 
-    # Collect all newly created objects (they'll be selected)
-    realized = [o for o in context.selected_objects if o != mesh_obj]
+        # Round position to group instances at the same location
+        pos = inst.matrix_world.translation
+        key = (round(pos.x, 3), round(pos.y, 3), round(pos.z, 3))
 
-    if not realized:
+        src = inst.object.original
+        if key not in seen_positions:
+            seen_positions[key] = (src, inst.matrix_world.copy())
+        elif src.type != 'MESH':
+            # Prefer the Empty (collection instance) over the child mesh,
+            # as it preserves the full asset hierarchy
+            seen_positions[key] = (src, inst.matrix_world.copy())
+
+    instances = list(seen_positions.values())
+
+    if not instances:
         return None
 
-    # Delete the original scatter mesh (just vertices, no materials)
-    name = mesh_obj.name
-    collections = list(mesh_obj.users_collection)
-    bpy.data.objects.remove(mesh_obj, do_unlink=True)
+    user_collections = list(scatter_obj.users_collection)
 
-    # Select all realized objects, join with one as active
+    # Duplicate each instance as a real object at its exact transform
+    created = []
+    for src_obj, matrix in instances:
+        new_obj = src_obj.copy()
+        if src_obj.data is not None:
+            new_obj.data = src_obj.data  # linked duplicate
+        new_obj.matrix_world = matrix
+
+        for col in user_collections:
+            col.objects.link(new_obj)
+
+        created.append(new_obj)
+
+    if not created:
+        return None
+
+    # Success — remove the scatter object
+    bpy.data.objects.remove(scatter_obj, do_unlink=True)
+    context.view_layer.update()
+
+    # Select all created objects
     bpy.ops.object.select_all(action='DESELECT')
-    for o in realized:
+    for o in created:
         o.select_set(True)
-    active = realized[0]
-    context.view_layer.objects.active = active
+    context.view_layer.objects.active = created[0]
 
-    if len(realized) > 1:
-        bpy.ops.object.join()
-
-    active.name = name
-    return active
+    return created
 
 
 class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
@@ -131,23 +159,30 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
             )
             return {"FINISHED"}
 
+        # Check if this is a scatter mesh (has stamp_layer attribute)
+        has_stamp_layer = (
+            obj.type == 'MESH'
+            and obj.data.attributes.get("stamp_layer") is not None
+        )
+
+        if has_stamp_layer:
+            created = _apply_scatter_modifier(context, obj)
+            if created is not None:
+                self.report(
+                    {"INFO"},
+                    f"Placed {len(created)} object(s) from scatter",
+                )
+                return {"FINISHED"}
+            self.report({"ERROR"}, "Could not apply scatter modifier")
+            return {"CANCELLED"}
+
+        # Standard modifier apply for other mesh objects
         count = 0
         for modifier in list(obj.modifiers):
             try:
                 bpy.ops.object.modifier_apply(modifier=modifier.name)
                 count += 1
             except RuntimeError:
-                # GN modifiers that output instances can't be applied directly.
-                # Use depsgraph to extract the evaluated mesh instead.
-                new_obj = _apply_mesh_via_depsgraph(context, obj)
-                if new_obj is not None:
-                    count = len(obj.modifiers)
-                    self.report(
-                        {"INFO"},
-                        f"Applied {count} modifier(s) via depsgraph"
-                        f" ({len(new_obj.data.vertices)} verts).",
-                    )
-                    return {"FINISHED"}
                 self.report(
                     {"WARNING"},
                     f"Could not apply '{modifier.name}'",
