@@ -14,7 +14,11 @@ Located in **3D Viewport > N-Panel > GPTools**.
 Non-destructive GP-to-mesh conversion powered by Geometry Nodes. The Grease Pencil object stays editable — modify your strokes and the mesh updates automatically.
 
 - **Solid Mesh** — Fills drawn shapes and extrudes them into solid 3D objects with adjustable thickness.
-- **Tube Mesh** — Turns strokes into tubes with configurable radius and cross-section resolution.
+- **Mirror Mesh** — Creates a mirrored solid mesh from a drawn half-shape. Draw one side, get both.
+- **Path Mesh** — Sweeps a cross-section profile along a drawn path. Draw the path on one layer, the profile on another.
+
+### Boolean
+- **Bool Cut** — Draw a shape on a mesh surface with GP (Surface stroke placement), then cut it out with a boolean. Adjust cut depth and resolution in the popup dialog.
 
 ### Screw Mesh
 Revolve a drawn profile into a 3D shape (vases, columns, turned objects).
@@ -38,7 +42,9 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 
 ## Tips
 - **Solid Mesh**: Draw closed shapes for best results. Adjust thickness in the modifier panel.
-- **Tube Mesh**: Works great with open strokes. Adjust radius and resolution in the modifier panel.
+- **Mirror Mesh**: Draw one half of a symmetrical shape. The flat edge aligns to the mirror axis automatically.
+- **Path Mesh**: Draw the sweep path first, then draw the cross-section profile on the second layer. Switch layers in Properties > Data.
+- **Bool Cut**: Target mesh must be solid (has wall thickness). Thin shells from Screw need a Solidify modifier applied first.
 - **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
 - GN-based operators are fully non-destructive — tweak all settings in the Properties > Modifiers panel after creation.

@@ -26,7 +26,6 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.label(text="Mesh from GP", icon="GEOMETRY_NODES")
         col = box.column(align=True)
         col.operator("gptools.gn_solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY")
-        col.operator("gptools.gn_tube_mesh", text="Tube Mesh", icon="MESH_CYLINDER")
         col.operator("gptools.gn_mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR")
         col.operator("gptools.gn_path_mesh", text="Path Mesh", icon="MOD_CURVE")
 

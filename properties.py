@@ -11,26 +11,6 @@ class GPToolsProperties(bpy.types.PropertyGroup):
         max=256,
     )
 
-    # Tube Mesh settings
-    tube_resolution: bpy.props.IntProperty(
-        name="Resolution",
-        description="Number of vertices around the tube cross-section",
-        default=12,
-        min=3,
-        max=64,
-    )
-
-    tube_radius: bpy.props.FloatProperty(
-        name="Radius",
-        description="Radius of the tube cross-section",
-        default=0.1,
-        min=0.001,
-        max=10.0,
-        step=0.01,
-        precision=3,
-        unit="LENGTH",
-    )
-
     # Lattice Wrap settings
     lattice_resolution: bpy.props.IntProperty(
         name="Resolution",

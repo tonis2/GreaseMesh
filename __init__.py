@@ -20,7 +20,6 @@ modules = [
     "grease_mesh.utils.conversion",
     "grease_mesh.operators.add_gpencil",
     "grease_mesh.operators.gn_solid_mesh",
-    "grease_mesh.operators.gn_tube_mesh",
     "grease_mesh.operators.gn_mirror_mesh",
     "grease_mesh.operators.gn_path_mesh",
     "grease_mesh.operators.screw_mesh",
@@ -66,7 +65,6 @@ from . import properties, panels
 from .operators import (
     add_gpencil,
     gn_solid_mesh,
-    gn_tube_mesh,
     gn_mirror_mesh,
     gn_path_mesh,
     screw_mesh,
@@ -81,7 +79,6 @@ registration_modules = [
     panels,
     add_gpencil,
     gn_solid_mesh,
-    gn_tube_mesh,
     gn_mirror_mesh,
     gn_path_mesh,
     screw_mesh,
