@@ -24,7 +24,7 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build vulkan.c3l
+      - name: Build GreaseMesh ZIP
         run: |
           zip -r GreaseMesh.zip ./* -x .claude -x "*.pyc" -x "*/__pycache__/*" -x "./__pycache__/" -x "*.sh"
 
