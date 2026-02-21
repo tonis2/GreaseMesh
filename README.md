@@ -25,6 +25,20 @@ Revolve a drawn profile into a 3D shape (vases, columns, turned objects).
 - **Screw** — Revolves a drawn profile 360° with configurable segments. Auto-detects the revolution axis and centerline from the drawing.
 - **Square Screw** — Same as Screw but with 4 steps for a square cross-section.
 
+### Stamp Scatter
+Scatter assets from a collection onto mesh surfaces using Grease Pencil marks. Perfect for placing windows, doors, props, or decorations on walls.
+1. Create a collection with your assets (windows, doors, etc.).
+2. Select the target mesh (wall) and create a Grease Pencil object.
+3. Draw marks on the wall where you want assets placed (short strokes work best).
+4. In GPTools, pick your asset collection and click **Scatter on Surface**.
+5. The addon creates a Geometry Nodes modifier that instances random assets from your collection at each GP mark, aligned to the surface.
+
+**Settings:**
+- **Asset Collection** — Collection containing meshes to scatter
+- **Scale** — Size multiplier for all scattered assets
+- **Point Spacing** — Distance between points along GP strokes (lower = more instances)
+- **Random Seed** — Change to get different random asset selections
+
 ### Lattice Wrap
 Conform one mesh onto another mesh's surface.
 1. Select two meshes (the one to deform + the target surface).
@@ -47,6 +61,7 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 - **Bool Cut**: Target mesh must be solid (has wall thickness). Thin shells from Screw need a Solidify modifier applied first.
 - **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
+- **Stamp Scatter**: Short GP strokes work best for precise placement. The addon samples points along each stroke and raycasts downward to find the surface. Use lower **Point Spacing** for dense scatter along lines (like placing fence posts).
 - GN-based operators are fully non-destructive — tweak all settings in the Properties > Modifiers panel after creation.
 
 ## License

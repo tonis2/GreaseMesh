@@ -26,6 +26,7 @@ modules = [
     "grease_mesh.operators.lattice_wrap",
     "grease_mesh.operators.bool_cut",
     "grease_mesh.operators.apply_modifiers",
+    "grease_mesh.operators.stamp_scatter",
     "grease_mesh.operators.dev_reload",
 ]
 
@@ -71,6 +72,7 @@ from .operators import (
     lattice_wrap,
     bool_cut,
     apply_modifiers,
+    stamp_scatter,
     dev_reload,
 )
 
@@ -85,6 +87,7 @@ registration_modules = [
     lattice_wrap,
     bool_cut,
     apply_modifiers,
+    stamp_scatter,
     dev_reload,
 ]
 

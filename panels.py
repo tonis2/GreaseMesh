@@ -39,7 +39,24 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.label(text="Screw Mesh", icon="MOD_SCREW")
         col = box.column(align=True)
         col.operator("gptools.screw_mesh", text="Screw", icon="MOD_SCREW")
-        col.operator("gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE")
+        col.operator(
+            "gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE"
+        )
+
+        # Stamp Scatter Section
+        box = layout.box()
+        box.label(text="Stamp Scatter", icon="OUTLINER_OB_POINTCLOUD")
+        col = box.column(align=True)
+        col.prop(props, "stamp_collection")
+        col.prop(props, "stamp_scale")
+        col.prop(props, "stamp_spacing")
+        col.prop(props, "stamp_seed")
+        row = col.row(align=True)
+        row.operator(
+            "gptools.stamp_scatter",
+            text="Scatter on Surface",
+            icon="OUTLINER_OB_POINTCLOUD",
+        )
 
         # Lattice Wrap Section
         box = layout.box()
@@ -52,7 +69,9 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         if "extensions" not in addon_dir:
             box = layout.box()
             box.label(text="Development", icon="SCRIPT")
-            box.operator("gptools.reload_addon", text="Reload Addon", icon="FILE_REFRESH")
+            box.operator(
+                "gptools.reload_addon", text="Reload Addon", icon="FILE_REFRESH"
+            )
 
 
 classes = [
