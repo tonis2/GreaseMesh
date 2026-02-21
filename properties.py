@@ -26,27 +26,6 @@ class GPToolsProperties(bpy.types.PropertyGroup):
         description="Collection of assets to scatter on GP marks",
         type=bpy.types.Collection,
     )
-    stamp_scale: bpy.props.FloatProperty(
-        name="Scale",
-        description="Scale of scattered assets",
-        default=1.0,
-        min=0.01,
-        max=10.0,
-    )
-    stamp_spacing: bpy.props.FloatProperty(
-        name="Point Spacing",
-        description="Distance between points along GP strokes",
-        default=0.5,
-        min=0.01,
-        max=10.0,
-    )
-    stamp_seed: bpy.props.IntProperty(
-        name="Random Seed",
-        description="Seed for random asset selection",
-        default=0,
-        min=0,
-        max=10000,
-    )
 
 
 classes = [

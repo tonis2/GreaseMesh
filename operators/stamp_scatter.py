@@ -1,66 +1,221 @@
 import bpy
-import random
+import math
 from mathutils import Vector
+from ..utils.conversion import get_active_grease_pencil
+
+NODE_GROUP_NAME = "GreaseMesh_StampScatter"
 
 
-def calculate_x_mark_centers(gp_obj):
-    """Calculate bounding box centers for each X mark from GP strokes.
+def _compute_x_mark_centers(gp_obj, merge_distance):
+    """Compute AABB centers of X marks from GP strokes.
 
-    Converts local GP coordinates to world space.
+    1. Get the centroid of each stroke (world space)
+    2. Group nearby centroids within merge_distance (X = 2 close strokes)
+    3. For each group, compute AABB of ALL points across its strokes
+    4. Return the AABB center of each group
     """
-    centers = []
-
-    # Get GP object's world matrix for coordinate transformation
     gp_matrix = gp_obj.matrix_world
 
+    # Collect per-stroke data: centroid + all world-space points
+    strokes_data = []
     for layer in gp_obj.data.layers:
         for frame in layer.frames:
-            strokes = frame.drawing.strokes
+            for stroke in frame.drawing.strokes:
+                if len(stroke.points) == 0:
+                    continue
+                world_pts = [gp_matrix @ Vector(pt.position) for pt in stroke.points]
+                centroid = Vector((0, 0, 0))
+                for p in world_pts:
+                    centroid += p
+                centroid /= len(world_pts)
+                strokes_data.append((centroid, world_pts))
 
-            # Process strokes in pairs (each X is 2 strokes)
-            for i in range(0, len(strokes), 2):
-                if i + 1 < len(strokes):
-                    stroke1 = strokes[i]
-                    stroke2 = strokes[i + 1]
+    if not strokes_data:
+        return []
 
-                    # Get all points from both strokes and transform to world space
-                    all_points = []
-                    for pt in stroke1.points:
-                        # Transform from local to world space
-                        world_pos = gp_matrix @ Vector(pt.position)
-                        all_points.append(world_pos)
-                    for pt in stroke2.points:
-                        # Transform from local to world space
-                        world_pos = gp_matrix @ Vector(pt.position)
-                        all_points.append(world_pos)
+    # Group strokes by centroid proximity
+    used = [False] * len(strokes_data)
+    groups = []
+    for i in range(len(strokes_data)):
+        if used[i]:
+            continue
+        group = [i]
+        used[i] = True
+        for j in range(i + 1, len(strokes_data)):
+            if used[j]:
+                continue
+            if (strokes_data[i][0] - strokes_data[j][0]).length <= merge_distance:
+                group.append(j)
+                used[j] = True
+        groups.append(group)
 
-                    if all_points:
-                        # Calculate bounding box center in world space
-                        min_x = min(p.x for p in all_points)
-                        max_x = max(p.x for p in all_points)
-                        min_y = min(p.y for p in all_points)
-                        max_y = max(p.y for p in all_points)
-                        min_z = min(p.z for p in all_points)
-                        max_z = max(p.z for p in all_points)
+    # For each group, compute AABB center from all points
+    centers = []
+    for group in groups:
+        all_pts = []
+        for idx in group:
+            all_pts.extend(strokes_data[idx][1])
 
-                        center = Vector(
-                            (
-                                (min_x + max_x) / 2,
-                                (min_y + max_y) / 2,
-                                (min_z + max_z) / 2,
-                            )
-                        )
-
-                        centers.append(center)
+        min_v = Vector((min(p.x for p in all_pts),
+                         min(p.y for p in all_pts),
+                         min(p.z for p in all_pts)))
+        max_v = Vector((max(p.x for p in all_pts),
+                         max(p.y for p in all_pts),
+                         max(p.z for p in all_pts)))
+        centers.append((min_v + max_v) / 2)
 
     return centers
 
 
-class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
-    """Scatter assets from a collection based on Grease Pencil X marks.
+def get_or_create_instance_node_group():
+    """GN group that instances a collection at each vertex of the input mesh.
 
-    Creates instances at X mark centers. Instances remain separate from the ground
-    mesh and preserve their materials.
+    Pipeline:
+      Mesh vertices → InstanceOnPoints (random pick from collection)
+        → RotateInstances (random Z) → ScaleInstances → Output
+    """
+    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
+    if ng is not None:
+        return ng
+
+    ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
+
+    # Interface sockets
+    ng.interface.new_socket(
+        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry',
+    )
+
+    ng.interface.new_socket(
+        name="Collection", in_out='INPUT', socket_type='NodeSocketCollection',
+    )
+
+    scale_sock = ng.interface.new_socket(
+        name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    scale_sock.default_value = 1.0
+    scale_sock.min_value = 0.01
+    scale_sock.max_value = 10.0
+
+    seed_sock = ng.interface.new_socket(
+        name="Seed", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    seed_sock.default_value = 0
+    seed_sock.min_value = 0
+    seed_sock.max_value = 10000
+
+    ng.interface.new_socket(
+        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
+    )
+
+    # --- Nodes ---
+    x = -600
+    group_in = ng.nodes.new('NodeGroupInput')
+    group_in.location = (x, 0)
+
+    # Collection Info
+    x += 200
+    coll_info = ng.nodes.new('GeometryNodeCollectionInfo')
+    coll_info.location = (x, -300)
+    coll_info.transform_space = 'RELATIVE'
+    coll_info.inputs['Separate Children'].default_value = True
+    coll_info.inputs['Reset Children'].default_value = True
+
+    # Index for per-point randomization
+    index_node = ng.nodes.new('GeometryNodeInputIndex')
+    index_node.location = (x, -150)
+
+    # Random integer for picking which collection object
+    rand_pick = ng.nodes.new('FunctionNodeRandomValue')
+    rand_pick.location = (x + 100, -200)
+    rand_pick.data_type = 'INT'
+    rand_pick.inputs[4].default_value = 0      # Min (INT)
+    rand_pick.inputs[5].default_value = 99999  # Max (INT, wraps via modulo)
+
+    # Instance on Points
+    x += 200
+    inst_on_pts = ng.nodes.new('GeometryNodeInstanceOnPoints')
+    inst_on_pts.location = (x, 0)
+    inst_on_pts.inputs['Pick Instance'].default_value = True
+
+    # Seed + 1 for different random stream for rotation
+    seed_offset = ng.nodes.new('ShaderNodeMath')
+    seed_offset.location = (x, -400)
+    seed_offset.operation = 'ADD'
+    seed_offset.inputs[1].default_value = 1
+
+    # Random float for Z rotation
+    rand_rot = ng.nodes.new('FunctionNodeRandomValue')
+    rand_rot.location = (x + 100, -300)
+    rand_rot.data_type = 'FLOAT'
+    rand_rot.inputs[2].default_value = -math.pi
+    rand_rot.inputs[3].default_value = math.pi
+
+    # Combine rotation vector (0, 0, random_z)
+    x += 200
+    combine_rot = ng.nodes.new('ShaderNodeCombineXYZ')
+    combine_rot.location = (x, -300)
+
+    # Rotate Instances
+    x += 200
+    rotate = ng.nodes.new('GeometryNodeRotateInstances')
+    rotate.location = (x, 0)
+
+    # Combine scale vector (S, S, S)
+    combine_scale = ng.nodes.new('ShaderNodeCombineXYZ')
+    combine_scale.location = (x, -200)
+
+    # Scale Instances
+    x += 200
+    scale_inst = ng.nodes.new('GeometryNodeScaleInstances')
+    scale_inst.location = (x, 0)
+
+    x += 200
+    group_out = ng.nodes.new('NodeGroupOutput')
+    group_out.location = (x, 0)
+
+    # --- Links ---
+    link = ng.links.new
+
+    # Collection
+    link(group_in.outputs['Collection'], coll_info.inputs['Collection'])
+
+    # Random pick
+    link(index_node.outputs['Index'], rand_pick.inputs['ID'])
+    link(group_in.outputs['Seed'], rand_pick.inputs['Seed'])
+
+    # Instance on Points (input geometry vertices = scatter points)
+    link(group_in.outputs['Geometry'], inst_on_pts.inputs['Points'])
+    link(coll_info.outputs['Instances'], inst_on_pts.inputs['Instance'])
+    link(rand_pick.outputs[2], inst_on_pts.inputs['Instance Index'])
+
+    # Random rotation
+    link(group_in.outputs['Seed'], seed_offset.inputs[0])
+    link(seed_offset.outputs['Value'], rand_rot.inputs['Seed'])
+    link(index_node.outputs['Index'], rand_rot.inputs['ID'])
+    link(rand_rot.outputs[1], combine_rot.inputs['Z'])
+
+    # Rotate
+    link(inst_on_pts.outputs['Instances'], rotate.inputs['Instances'])
+    link(combine_rot.outputs['Vector'], rotate.inputs['Rotation'])
+
+    # Scale
+    link(group_in.outputs['Scale'], combine_scale.inputs['X'])
+    link(group_in.outputs['Scale'], combine_scale.inputs['Y'])
+    link(group_in.outputs['Scale'], combine_scale.inputs['Z'])
+    link(rotate.outputs['Instances'], scale_inst.inputs['Instances'])
+    link(combine_scale.outputs['Vector'], scale_inst.inputs['Scale'])
+
+    # Output
+    link(scale_inst.outputs['Instances'], group_out.inputs['Geometry'])
+
+    return ng
+
+
+class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
+    """Scatter collection assets at GP X-mark locations on a surface.
+
+    Computes AABB center of each X mark, creates a scatter mesh,
+    and adds a non-destructive GN instancing modifier.
     """
 
     bl_idname = "gptools.stamp_scatter"
@@ -69,185 +224,75 @@ class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        # Need both a mesh and a Grease Pencil in selection
-        has_mesh = False
-        has_gp = False
-
-        for obj in context.selected_objects:
-            if obj.type == "MESH":
-                has_mesh = True
-            elif obj.type == "GREASEPENCIL":
-                has_gp = True
-
-        if not has_mesh or not has_gp:
+        gp = get_active_grease_pencil(context)
+        if gp is None:
             return False
-
-        # Also need an asset collection selected
         if not context.scene.gptools.stamp_collection:
             return False
-
         return True
 
     def execute(self, context):
         props = context.scene.gptools
-
-        # Find mesh and GP from selected objects
-        mesh_obj = None
-        gp_obj = None
-
-        for obj in context.selected_objects:
-            if obj.type == "MESH" and not mesh_obj:
-                mesh_obj = obj
-            elif obj.type == "GREASEPENCIL" and not gp_obj:
-                gp_obj = obj
-
-        if not mesh_obj:
-            self.report({"ERROR"}, "No mesh object found in selection")
-            return {"CANCELLED"}
+        gp_obj = get_active_grease_pencil(context)
 
         if not gp_obj:
-            self.report({"ERROR"}, "No Grease Pencil found in selection")
+            self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        # Get collection
         coll = props.stamp_collection
         if not coll:
             self.report({"ERROR"}, "Please select an asset collection")
             return {"CANCELLED"}
 
-        # Get mesh objects from collection
-        coll_objects = [obj for obj in coll.objects if obj.type == "MESH"]
-        if not coll_objects:
-            self.report({"ERROR"}, "No mesh objects found in collection")
+        # Compute X mark centers using AABB (merge distance = 2.0)
+        centers = _compute_x_mark_centers(gp_obj, 2.0)
+        if not centers:
+            self.report({"ERROR"}, "No marks found in Grease Pencil strokes")
             return {"CANCELLED"}
 
-        # Calculate X mark centers
-        x_centers = calculate_x_mark_centers(gp_obj)
+        # Create a scatter mesh with one vertex per X mark center
+        mesh = bpy.data.meshes.new("StampScatter")
+        mesh.from_pydata([c[:] for c in centers], [], [])
+        mesh.update()
 
-        if not x_centers:
-            self.report({"ERROR"}, "No X marks found in Grease Pencil")
-            return {"CANCELLED"}
+        scatter_obj = bpy.data.objects.new("StampScatter", mesh)
+        for col in gp_obj.users_collection:
+            col.objects.link(scatter_obj)
 
-        # Create instances at X mark centers
-        instances = []
+        # Add the instancing GN modifier
+        node_group = get_or_create_instance_node_group()
+        mod = scatter_obj.modifiers.new(name="StampScatter", type='NODES')
+        mod.node_group = node_group
 
-        for i, center in enumerate(x_centers):
-            # Pick random object from collection
-            source_obj = random.choice(coll_objects)
+        items = mod.node_group.interface.items_tree
+        mod[items['Collection'].identifier] = coll
 
-            # Create instance (copy of object)
-            new_obj = source_obj.copy()
-            new_obj.data = source_obj.data.copy()
+        # Select the scatter object
+        context.view_layer.objects.active = scatter_obj
+        scatter_obj.select_set(True)
+        gp_obj.select_set(False)
 
-            # Position at X mark center
-            new_obj.location = center
+        # Switch Properties panel to Modifiers tab
+        try:
+            for area in context.screen.areas:
+                if area.type == 'PROPERTIES':
+                    for space in area.spaces:
+                        if space.type == 'PROPERTIES':
+                            space.context = 'MODIFIER'
+                            break
+                    break
+        except TypeError:
+            pass
 
-            # Apply scale
-            new_obj.scale = (props.stamp_scale, props.stamp_scale, props.stamp_scale)
-
-            # Random rotation around Z
-            random_rot = random.uniform(-3.14159, 3.14159)
-            new_obj.rotation_euler = (0, 0, random_rot)
-
-            # Parent to target mesh (keeps them organized but separate)
-            new_obj.parent = mesh_obj
-            new_obj.parent_type = "OBJECT"
-
-            # Link to scene
-            context.scene.collection.objects.link(new_obj)
-            instances.append(new_obj)
-
-        # Report success
         self.report(
             {"INFO"},
-            f"Stamp scatter complete! Created {len(instances)} instances from '{coll.name}' at X mark centers.",
-        )
-
-        return {"FINISHED"}
-
-
-class GPTOOLS_OT_stamp_scatter_selected(bpy.types.Operator):
-    """Quick scatter using the selected collection"""
-
-    bl_idname = "gptools.stamp_scatter_selected"
-    bl_label = "Scatter Selected Collection"
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context):
-        has_collection = False
-        if context.selected_ids:
-            for item in context.selected_ids:
-                if isinstance(item, bpy.types.Collection):
-                    has_collection = True
-                    break
-
-        has_mesh = False
-        has_gp = False
-        for obj in context.selected_objects:
-            if obj.type == "MESH":
-                has_mesh = True
-            elif obj.type == "GREASEPENCIL":
-                has_gp = True
-
-        return has_mesh and has_gp and has_collection
-
-    def execute(self, context):
-        # Find mesh and GP
-        mesh_obj = None
-        gp_obj = None
-
-        for obj in context.selected_objects:
-            if obj.type == "MESH" and not mesh_obj:
-                mesh_obj = obj
-            elif obj.type == "GREASEPENCIL" and not gp_obj:
-                gp_obj = obj
-
-        # Get collection
-        coll = None
-        for item in context.selected_ids:
-            if isinstance(item, bpy.types.Collection):
-                coll = item
-                break
-
-        if not mesh_obj or not gp_obj or not coll:
-            self.report({"ERROR"}, "Need mesh, GP, and collection selected")
-            return {"CANCELLED"}
-
-        # Get mesh objects
-        coll_objects = [obj for obj in coll.objects if obj.type == "MESH"]
-        if not coll_objects:
-            self.report({"ERROR"}, "No mesh objects in collection")
-            return {"CANCELLED"}
-
-        # Calculate centers
-        x_centers = calculate_x_mark_centers(gp_obj)
-
-        if not x_centers:
-            self.report({"ERROR"}, "No X marks found")
-            return {"CANCELLED"}
-
-        # Create instances
-        instances = []
-        for center in x_centers:
-            source_obj = random.choice(coll_objects)
-            new_obj = source_obj.copy()
-            new_obj.data = source_obj.data.copy()
-            new_obj.location = center
-            new_obj.parent = mesh_obj
-            new_obj.parent_type = "OBJECT"
-            context.scene.collection.objects.link(new_obj)
-            instances.append(new_obj)
-
-        self.report(
-            {"INFO"}, f"Stamp scatter complete! {len(instances)} instances created."
+            f"Scattered {len(centers)} instance(s) — edit settings in Modifiers panel",
         )
         return {"FINISHED"}
 
 
 classes = [
     GPTOOLS_OT_stamp_scatter,
-    GPTOOLS_OT_stamp_scatter_selected,
 ]
 
 
