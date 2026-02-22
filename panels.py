@@ -24,16 +24,11 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Mesh from GP Section
         box = layout.box()
         box.label(text="Mesh from GP", icon="GEOMETRY_NODES")
-        grid = box.grid_flow(row_major=True, columns=2, align=True)
+        grid = box.grid_flow(row_major=True, columns=2, align=False)
         grid.operator("gptools.gn_solid_mesh", text="Solid", icon="MOD_SOLIDIFY")
         grid.operator("gptools.gn_mirror_mesh", text="Mirror", icon="MOD_MIRROR")
         grid.operator("gptools.gn_path_mesh", text="Path", icon="MOD_CURVE")
         grid.operator("gptools.gn_wall_mesh", text="Wall", icon="MOD_BUILD")
-
-        # Boolean Section
-        box = layout.box()
-        box.label(text="Boolean", icon="MOD_BOOLEAN")
-        box.operator("gptools.bool_cut", text="Bool Cut", icon="MOD_BOOLEAN")
 
         # Screw Mesh Section
         box = layout.box()
@@ -44,20 +39,18 @@ class GPTOOLS_PT_main(bpy.types.Panel):
             "gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE"
         )
 
-        # Stamp Scatter Section
+        # Other Section
         box = layout.box()
-        box.label(text="Stamp Scatter", icon="OUTLINER_OB_POINTCLOUD")
-        box.operator(
+        box.label(text="Other", icon="TOOL_SETTINGS")
+        grid = box.grid_flow(row_major=True, columns=2, align=False)
+        grid.operator("gptools.bool_cut", text="Bool Cut", icon="MOD_BOOLEAN")
+        grid.operator("gptools.array_on_curve", text="Array on Pencil", icon="MOD_ARRAY")
+        grid.operator(
             "gptools.stamp_scatter",
-            text="Scatter on Surface",
+            text="Scatter",
             icon="OUTLINER_OB_POINTCLOUD",
         )
-
-        # Lattice Wrap Section
-        box = layout.box()
-        box.label(text="Lattice Wrap", icon="MOD_LATTICE")
-        box.prop(props, "lattice_resolution")
-        box.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
+        grid.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
 
         # Dev Section — only visible when running from a local dev path
         addon_dir = os.path.dirname(os.path.realpath(__file__))
