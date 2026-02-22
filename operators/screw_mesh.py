@@ -145,7 +145,8 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
 
-        bpy.ops.object.shade_smooth()
+        for poly in mesh_obj.data.polygons:
+            poly.use_smooth = True
 
         # Delete original GP
         if gp_name in bpy.data.objects:
@@ -218,7 +219,8 @@ class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
 
-        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(30))
+        for poly in mesh_obj.data.polygons:
+            poly.use_smooth = True
 
         # Delete original GP
         if gp_name in bpy.data.objects:

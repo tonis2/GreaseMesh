@@ -24,10 +24,11 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         # Mesh from GP Section
         box = layout.box()
         box.label(text="Mesh from GP", icon="GEOMETRY_NODES")
-        col = box.column(align=True)
-        col.operator("gptools.gn_solid_mesh", text="Solid Mesh", icon="MOD_SOLIDIFY")
-        col.operator("gptools.gn_mirror_mesh", text="Mirror Mesh", icon="MOD_MIRROR")
-        col.operator("gptools.gn_path_mesh", text="Path Mesh", icon="MOD_CURVE")
+        grid = box.grid_flow(row_major=True, columns=2, align=True)
+        grid.operator("gptools.gn_solid_mesh", text="Solid", icon="MOD_SOLIDIFY")
+        grid.operator("gptools.gn_mirror_mesh", text="Mirror", icon="MOD_MIRROR")
+        grid.operator("gptools.gn_path_mesh", text="Path", icon="MOD_CURVE")
+        grid.operator("gptools.gn_wall_mesh", text="Wall", icon="MOD_BUILD")
 
         # Boolean Section
         box = layout.box()

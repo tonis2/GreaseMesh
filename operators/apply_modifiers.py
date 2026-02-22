@@ -176,17 +176,26 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
             self.report({"ERROR"}, "Could not apply scatter modifier")
             return {"CANCELLED"}
 
-        # Standard modifier apply for other mesh objects
-        count = 0
-        for modifier in list(obj.modifiers):
-            try:
-                bpy.ops.object.modifier_apply(modifier=modifier.name)
-                count += 1
-            except RuntimeError:
-                self.report(
-                    {"WARNING"},
-                    f"Could not apply '{modifier.name}'",
-                )
+        # Apply all modifiers by evaluating the final mesh from depsgraph.
+        # Using bpy.ops.object.modifier_apply() in a loop creates nested
+        # undo steps that break Ctrl+Z, so we use the low-level approach.
+        depsgraph = context.evaluated_depsgraph_get()
+        eval_obj = obj.evaluated_get(depsgraph)
+        new_mesh = bpy.data.meshes.new_from_object(eval_obj)
+
+        if new_mesh is None or len(new_mesh.vertices) == 0:
+            self.report({"ERROR"}, "No mesh geometry produced by modifiers.")
+            return {"CANCELLED"}
+
+        old_mesh = obj.data
+        new_mesh.name = old_mesh.name
+        obj.data = new_mesh
+        # Don't remove old_mesh — bpy.data.meshes.remove() bypasses undo.
+        # The orphaned mesh is auto-cleaned on file save.
+
+        count = len(obj.modifiers)
+        for mod in list(obj.modifiers):
+            obj.modifiers.remove(mod)
 
         self.report({"INFO"}, f"Applied {count} modifier(s)")
         return {"FINISHED"}

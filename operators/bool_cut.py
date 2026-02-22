@@ -304,10 +304,20 @@ class GPTOOLS_OT_bool_cut(bpy.types.Operator):
         # Hide cutter from viewport (boolean still uses it)
         cutter.hide_set(True)
 
-        # Apply the boolean modifier
+        # Apply the boolean modifier via depsgraph (avoids nested undo steps
+        # that break Ctrl+Z when using bpy.ops.object.modifier_apply).
         context.view_layer.objects.active = target
         try:
-            bpy.ops.object.modifier_apply(modifier=bool_mod.name)
+            depsgraph = context.evaluated_depsgraph_get()
+            eval_target = target.evaluated_get(depsgraph)
+            new_mesh = bpy.data.meshes.new_from_object(eval_target)
+            if new_mesh is None or len(new_mesh.vertices) == 0:
+                raise RuntimeError("Boolean produced no geometry")
+            old_mesh = target.data
+            new_mesh.name = old_mesh.name
+            target.data = new_mesh
+            # Don't remove old_mesh — bypasses undo system.
+            target.modifiers.remove(bool_mod)
         except Exception as e:
             self.report({"ERROR"}, f"Boolean failed: {e}")
             bpy.data.objects.remove(cutter, do_unlink=True)
