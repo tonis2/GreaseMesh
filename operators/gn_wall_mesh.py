@@ -8,10 +8,15 @@ def get_or_create_wall_node_group():
     """Get existing or build the Wall Mesh geometry node group.
 
     Pipeline:
-      GP (floor plan strokes) → Curves → Resample → Set Cyclic
+      GP (floor plan strokes) → Curves → Curve to Mesh (edges only)
+        → Merge by Distance (weld nearby stroke endpoints into continuous path)
+        → Mesh to Curve → Resample → Set Cyclic
         → Rectangle profile (Thickness × Height), offset up by Height/2
         → Curve to Mesh (sweep profile along floor plan, fill caps)
         → Shade Smooth → Output
+
+    The Merge by Distance step handles floor plans drawn as multiple
+    strokes — their endpoints get welded into a single continuous curve.
     """
     ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
     if ng is not None:
@@ -43,10 +48,17 @@ def get_or_create_wall_node_group():
     thick_sock.min_value = 0.01
     thick_sock.max_value = 10.0
 
+    merge_sock = ng.interface.new_socket(
+        name="Merge Distance", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    merge_sock.default_value = 0.5
+    merge_sock.min_value = 0.001
+    merge_sock.max_value = 10.0
+
     ng.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
 
     # --- Nodes ---
-    x = -1200
+    x = -1600
     group_in = ng.nodes.new('NodeGroupInput')
     group_in.location = (x, 0)
 
@@ -55,6 +67,21 @@ def get_or_create_wall_node_group():
     gp_to_curves = ng.nodes.new('GeometryNodeGreasePencilToCurves')
     gp_to_curves.location = (x, 0)
     gp_to_curves.inputs['Layers as Instances'].default_value = False
+
+    # Convert curves to edges (no profile = edge loop) to allow merging
+    x += 200
+    curves_to_edges = ng.nodes.new('GeometryNodeCurveToMesh')
+    curves_to_edges.location = (x, 0)
+
+    # Merge by Distance — welds nearby stroke endpoints into continuous path
+    x += 200
+    merge = ng.nodes.new('GeometryNodeMergeByDistance')
+    merge.location = (x, 0)
+
+    # Convert edges back to curves
+    x += 200
+    mesh_to_curve = ng.nodes.new('GeometryNodeMeshToCurve')
+    mesh_to_curve.location = (x, 0)
 
     # Resample to uniform point count
     x += 200
@@ -67,6 +94,12 @@ def get_or_create_wall_node_group():
     set_cyclic.location = (x, 0)
     set_cyclic.inputs['Cyclic'].default_value = True
 
+    # Force curve normal to Z-up so walls stay vertical
+    x += 200
+    set_normal = ng.nodes.new('GeometryNodeSetCurveNormal')
+    set_normal.location = (x, 0)
+    set_normal.inputs['Mode'].default_value = 'Z Up'
+
     # Rectangle profile: Width = Thickness, Height = Height
     x += 200
     quad = ng.nodes.new('GeometryNodeCurvePrimitiveQuadrilateral')
@@ -77,9 +110,9 @@ def get_or_create_wall_node_group():
     half_height = ng.nodes.new('ShaderNodeMath')
     half_height.location = (x, -500)
     half_height.operation = 'MULTIPLY'
-    half_height.inputs[1].default_value = 0.5
+    half_height.inputs[1].default_value = -0.5
 
-    # Build offset vector (0, 0, Height/2) — Z is up in Blender
+    # Build offset vector (0, Height/2, 0) — Y is the height axis in profile space
     x += 200
     combine = ng.nodes.new('ShaderNodeCombineXYZ')
     combine.location = (x, -500)
@@ -106,11 +139,18 @@ def get_or_create_wall_node_group():
     # --- Links ---
     link = ng.links.new
 
-    # GP → Curves → Resample → Cyclic
+    # GP → Curves → Edges → Merge → Back to Curves
     link(group_in.outputs['Geometry'], gp_to_curves.inputs['Grease Pencil'])
-    link(gp_to_curves.outputs['Curves'], resample.inputs['Curve'])
+    link(gp_to_curves.outputs['Curves'], curves_to_edges.inputs['Curve'])
+    link(curves_to_edges.outputs['Mesh'], merge.inputs['Geometry'])
+    link(group_in.outputs['Merge Distance'], merge.inputs['Distance'])
+    link(merge.outputs['Geometry'], mesh_to_curve.inputs['Mesh'])
+
+    # Resample → Cyclic
+    link(mesh_to_curve.outputs['Curve'], resample.inputs['Curve'])
     link(group_in.outputs['Resolution'], resample.inputs['Count'])
     link(resample.outputs['Curve'], set_cyclic.inputs['Curve'])
+    link(set_cyclic.outputs['Curve'], set_normal.inputs['Curve'])
 
     # Rectangle profile: Width = Thickness, Height = Height
     link(group_in.outputs['Thickness'], quad.inputs['Width'])
@@ -118,12 +158,12 @@ def get_or_create_wall_node_group():
 
     # Offset profile: Height/2 → CombineXYZ(Z) → SetPosition offset
     link(group_in.outputs['Height'], half_height.inputs[0])
-    link(half_height.outputs['Value'], combine.inputs['Z'])
+    link(half_height.outputs['Value'], combine.inputs['Y'])
     link(quad.outputs['Curve'], set_pos.inputs['Geometry'])
     link(combine.outputs['Vector'], set_pos.inputs['Offset'])
 
     # Sweep profile along floor plan curves
-    link(set_cyclic.outputs['Curve'], curve_to_mesh.inputs['Curve'])
+    link(set_normal.outputs['Curve'], curve_to_mesh.inputs['Curve'])
     link(set_pos.outputs['Geometry'], curve_to_mesh.inputs['Profile Curve'])
 
     # Shade smooth → Output
