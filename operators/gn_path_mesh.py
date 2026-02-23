@@ -203,6 +203,18 @@ def _show_properties_tab(context, tab):
         pass
 
 
+def _set_topdown_view(context):
+    """Switch the 3D viewport to top-down orthographic view."""
+    from mathutils import Quaternion
+    for area in context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    space.region_3d.view_perspective = 'ORTHO'
+                    space.region_3d.view_rotation = Quaternion((1, 0, 0, 0))
+                    return
+
+
 class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
     """Add Geometry Nodes modifier to sweep a profile along a path from Grease Pencil layers"""
 
@@ -235,9 +247,10 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
         if not has_profile:
             _show_properties_tab(context, 'DATA')
             gp_data.layers.active = profile
+            _set_topdown_view(context)
             self.report(
                 {"WARNING"},
-                "Now draw the cross-section on the 'Profile' layer, then click Path Mesh again.",
+                "Draw the profile shape from top view, then click Path Mesh again.",
             )
             return {"CANCELLED"}
 

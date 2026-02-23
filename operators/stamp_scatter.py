@@ -76,7 +76,11 @@ def get_or_create_scatter_node_group():
 
     Pipeline:
       Points → CollectionInfo → InstanceOnPoints (random pick)
-        → RotateInstances (random Z) → ScaleInstances → Output
+        → RotateInstances (random Z OR surface-aligned) → ScaleInstances → Output
+
+    When Align to Surface is enabled with a Target Object, instances are
+    rotated to face outward from the target surface (Y axis aligned to
+    surface normal, Z stays up). Otherwise, random Z rotation is used.
 
     Cached by name — shared across all scatter operations.
     """
@@ -108,11 +112,19 @@ def get_or_create_scatter_node_group():
     seed_sock.max_value = 10000
 
     ng.interface.new_socket(
+        name="Target Object", in_out='INPUT', socket_type='NodeSocketObject',
+    )
+    align_sock = ng.interface.new_socket(
+        name="Align to Surface", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    align_sock.default_value = False
+
+    ng.interface.new_socket(
         name="Instances", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
 
     # --- Nodes ---
-    x = -600
+    x = -800
     group_in = ng.nodes.new('NodeGroupInput')
     group_in.location = (x, 0)
 
@@ -135,8 +147,33 @@ def get_or_create_scatter_node_group():
     rand_pick.inputs[4].default_value = 0      # Min (INT)
     rand_pick.inputs[5].default_value = 99999  # Max (INT)
 
+    # --- Surface alignment branch ---
+    # ObjectInfo for target surface
+    obj_info = ng.nodes.new('GeometryNodeObjectInfo')
+    obj_info.location = (x, -600)
+    obj_info.transform_space = 'RELATIVE'
+
+    # Input Normal (to sample from target mesh)
+    input_normal = ng.nodes.new('GeometryNodeInputNormal')
+    input_normal.location = (x + 200, -700)
+
+    # Input Position (sample position = scatter point positions)
+    input_pos = ng.nodes.new('GeometryNodeInputPosition')
+    input_pos.location = (x + 200, -500)
+
+    # Sample Nearest Surface — get normal from target at each scatter point
+    sample_surface = ng.nodes.new('GeometryNodeSampleNearestSurface')
+    sample_surface.location = (x + 400, -600)
+    sample_surface.data_type = 'FLOAT_VECTOR'
+
+    # Align Rotation to Vector — Y axis faces wall normal, Z stays up
+    align_rot = ng.nodes.new('FunctionNodeAlignRotationToVector')
+    align_rot.location = (x + 600, -600)
+    align_rot.axis = 'Y'
+    align_rot.pivot_axis = 'Z'
+
     # Instance on Points
-    x += 200
+    x += 400
     inst_on_pts = ng.nodes.new('GeometryNodeInstanceOnPoints')
     inst_on_pts.location = (x, 0)
     inst_on_pts.inputs['Pick Instance'].default_value = True
@@ -159,17 +196,22 @@ def get_or_create_scatter_node_group():
     combine_rot = ng.nodes.new('ShaderNodeCombineXYZ')
     combine_rot.location = (x, -300)
 
-    # Rotate Instances
+    # Rotate Instances (random Z)
     x += 200
     rotate = ng.nodes.new('GeometryNodeRotateInstances')
-    rotate.location = (x, 0)
+    rotate.location = (x, -200)
+
+    # Switch: skip random rotation when aligning to surface
+    rot_switch = ng.nodes.new('GeometryNodeSwitch')
+    rot_switch.location = (x, 0)
+    rot_switch.input_type = 'GEOMETRY'
 
     # Combine scale vector (S, S, S)
     combine_scale = ng.nodes.new('ShaderNodeCombineXYZ')
-    combine_scale.location = (x, -200)
+    combine_scale.location = (x + 200, -200)
 
     # Scale Instances
-    x += 200
+    x += 400
     scale_inst = ng.nodes.new('GeometryNodeScaleInstances')
     scale_inst.location = (x, 0)
 
@@ -187,6 +229,16 @@ def get_or_create_scatter_node_group():
     link(index_node.outputs['Index'], rand_pick.inputs['ID'])
     link(group_in.outputs['Seed'], rand_pick.inputs['Seed'])
 
+    # Surface alignment: ObjectInfo → SampleNearestSurface → AlignRotationToVector
+    link(group_in.outputs['Target Object'], obj_info.inputs['Object'])
+    link(obj_info.outputs['Geometry'], sample_surface.inputs['Mesh'])
+    link(input_normal.outputs['Normal'], sample_surface.inputs['Value'])
+    link(input_pos.outputs['Position'], sample_surface.inputs['Sample Position'])
+    link(sample_surface.outputs['Value'], align_rot.inputs['Vector'])
+
+    # Feed surface rotation into InstanceOnPoints
+    link(align_rot.outputs['Rotation'], inst_on_pts.inputs['Rotation'])
+
     # Instance on Points
     link(group_in.outputs['Points'], inst_on_pts.inputs['Points'])
     link(coll_info.outputs['Instances'], inst_on_pts.inputs['Instance'])
@@ -198,15 +250,20 @@ def get_or_create_scatter_node_group():
     link(index_node.outputs['Index'], rand_rot.inputs['ID'])
     link(rand_rot.outputs[1], combine_rot.inputs['Z'])
 
-    # Rotate
+    # Rotate (random Z — only used when NOT aligning)
     link(inst_on_pts.outputs['Instances'], rotate.inputs['Instances'])
     link(combine_rot.outputs['Vector'], rotate.inputs['Rotation'])
+
+    # Switch: Align to Surface → skip random rotation (True), use random (False)
+    link(group_in.outputs['Align to Surface'], rot_switch.inputs['Switch'])
+    link(rotate.outputs['Instances'], rot_switch.inputs['False'])
+    link(inst_on_pts.outputs['Instances'], rot_switch.inputs['True'])
 
     # Scale
     link(group_in.outputs['Scale'], combine_scale.inputs['X'])
     link(group_in.outputs['Scale'], combine_scale.inputs['Y'])
     link(group_in.outputs['Scale'], combine_scale.inputs['Z'])
-    link(rotate.outputs['Instances'], scale_inst.inputs['Instances'])
+    link(rot_switch.outputs['Output'], scale_inst.inputs['Instances'])
     link(combine_scale.outputs['Vector'], scale_inst.inputs['Scale'])
 
     # Output
@@ -244,6 +301,14 @@ def _build_wrapper_node_tree(gp_name, layer_names):
         ng.interface.new_socket(
             name=layer_name, in_out='INPUT', socket_type='NodeSocketCollection',
         )
+
+    ng.interface.new_socket(
+        name="Target Object", in_out='INPUT', socket_type='NodeSocketObject',
+    )
+    align_sock = ng.interface.new_socket(
+        name="Align to Surface", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    align_sock.default_value = False
 
     scale_sock = ng.interface.new_socket(
         name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
@@ -316,6 +381,8 @@ def _build_wrapper_node_tree(gp_name, layer_names):
         link(group_in.outputs[layer_name], sub_group.inputs['Collection'])
         link(group_in.outputs['Scale'], sub_group.inputs['Scale'])
         link(group_in.outputs['Seed'], sub_group.inputs['Seed'])
+        link(group_in.outputs['Target Object'], sub_group.inputs['Target Object'])
+        link(group_in.outputs['Align to Surface'], sub_group.inputs['Align to Surface'])
 
         # Wire sub-group output to join
         link(sub_group.outputs['Instances'], join_geo.inputs['Geometry'])

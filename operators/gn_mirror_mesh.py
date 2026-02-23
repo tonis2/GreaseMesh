@@ -41,7 +41,8 @@ def _build_interface(ng):
 
 
 def _add_origin_shift(ng, link, group_in, solid_out, x):
-    """Move geometry so bbox min sits at origin (mirror seam edge)."""
+    """Move geometry so bbox min sits at origin (mirror seam edge).
+    Returns (shifted_geometry_output, bbox_min_output) so position can be restored later."""
     bbox = ng.nodes.new('GeometryNodeBoundBox')
     bbox.location = (x, -200)
 
@@ -65,6 +66,26 @@ def _add_origin_shift(ng, link, group_in, solid_out, x):
     link(pos.outputs['Position'], add.inputs[0])
     link(negate.outputs['Vector'], add.inputs[1])
     link(solid_out, set_pos.inputs['Geometry'])
+    link(add.outputs['Vector'], set_pos.inputs['Position'])
+
+    return set_pos.outputs['Geometry'], bbox.outputs['Min']
+
+
+def _add_position_restore(ng, link, geometry_out, bbox_min_out, x):
+    """Move geometry back to its original position after mirroring."""
+    pos = ng.nodes.new('GeometryNodeInputPosition')
+    pos.location = (x, 200)
+
+    add = ng.nodes.new('ShaderNodeVectorMath')
+    add.location = (x + 200, 200)
+    add.operation = 'ADD'
+
+    set_pos = ng.nodes.new('GeometryNodeSetPosition')
+    set_pos.location = (x + 400, 0)
+
+    link(pos.outputs['Position'], add.inputs[0])
+    link(bbox_min_out, add.inputs[1])
+    link(geometry_out, set_pos.inputs['Geometry'])
     link(add.outputs['Vector'], set_pos.inputs['Position'])
 
     return set_pos.outputs['Geometry']
@@ -136,7 +157,7 @@ def get_or_create_mirror_node_group():
 
     # Shift so bbox min is at origin (mirror seam)
     x += 200
-    prev = _add_origin_shift(ng, link, group_in, solid_group.outputs['Geometry'], x)
+    prev, bbox_min = _add_origin_shift(ng, link, group_in, solid_group.outputs['Geometry'], x)
     x += 800
 
     # Mirror stages
@@ -144,6 +165,11 @@ def get_or_create_mirror_node_group():
         x += 200
         prev = _add_mirror_stage(ng, link, group_in, prev, axis_name, scale, x)
         x += 800
+
+    # Restore original position
+    x += 200
+    prev = _add_position_restore(ng, link, prev, bbox_min, x)
+    x += 600
 
     # Shade smooth → output
     shade = ng.nodes.new('GeometryNodeSetShadeSmooth')

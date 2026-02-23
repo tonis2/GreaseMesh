@@ -138,14 +138,23 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def _find_target(cls, context):
+        """Return the object to apply modifiers on.
+        Prefers active object, falls back to first selected with modifiers."""
         obj = context.active_object
-        if obj is None or len(obj.modifiers) == 0:
-            return False
-        return obj.type in {"MESH", "GREASEPENCIL"}
+        if obj and obj.type in {"MESH", "GREASEPENCIL"} and len(obj.modifiers) > 0:
+            return obj
+        for obj in context.selected_objects:
+            if obj.type in {"MESH", "GREASEPENCIL"} and len(obj.modifiers) > 0:
+                return obj
+        return None
+
+    @classmethod
+    def poll(cls, context):
+        return cls._find_target(context) is not None
 
     def execute(self, context):
-        obj = context.active_object
+        obj = self._find_target(context)
 
         if obj.type == "GREASEPENCIL":
             name = obj.name
@@ -193,9 +202,26 @@ class GPTOOLS_OT_apply_all_modifiers(bpy.types.Operator):
         # Don't remove old_mesh — bpy.data.meshes.remove() bypasses undo.
         # The orphaned mesh is auto-cleaned on file save.
 
+        # Collect curve objects referenced by Array GN modifiers (from Array on Pencil)
+        cleanup_objects = []
+        for mod in obj.modifiers:
+            if mod.type == 'NODES' and mod.node_group and mod.node_group.name == 'Array':
+                curve_obj = mod.get("Socket_27")
+                if curve_obj and isinstance(curve_obj, bpy.types.Object) and curve_obj.type == 'CURVE':
+                    cleanup_objects.append(curve_obj)
+
         count = len(obj.modifiers)
         for mod in list(obj.modifiers):
             obj.modifiers.remove(mod)
+
+        # Remove curve objects and their hidden source GP objects
+        for curve_obj in cleanup_objects:
+            # Find the matching hidden GP (name without "_Curve" suffix)
+            gp_name = curve_obj.name.removesuffix("_Curve")
+            gp_obj = bpy.data.objects.get(gp_name)
+            if gp_obj and gp_obj.type == 'GREASEPENCIL':
+                bpy.data.objects.remove(gp_obj, do_unlink=True)
+            bpy.data.objects.remove(curve_obj, do_unlink=True)
 
         self.report({"INFO"}, f"Applied {count} modifier(s)")
         return {"FINISHED"}
