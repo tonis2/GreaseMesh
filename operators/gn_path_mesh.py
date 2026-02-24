@@ -61,6 +61,16 @@ def _build_interface(ng):
     )
     s.default_value = True
 
+    s = ng.interface.new_socket(
+        name="Corner Radius", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 0.1, 0.0, 10.0
+
+    s = ng.interface.new_socket(
+        name="Corner Resolution", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    s.default_value, s.min_value, s.max_value = 4, 1, 32
+
     ng.interface.new_socket(
         name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
@@ -138,6 +148,128 @@ def _add_center_offset(ng, link, curve_out, x, y):
     return set_pos.outputs['Geometry']
 
 
+def _add_flatten_profile(ng, link, geometry_out, x, y):
+    """Flatten profile to XY plane by detecting the thinnest bbox axis.
+
+    Finds which axis (X, Y, or Z) has the smallest extent and discards it,
+    remapping the other two axes to X and Y.  This lets users draw the
+    profile from any view angle (top, front, side) and get a correct result.
+    """
+    # --- bbox extent per axis ---
+    bbox = ng.nodes.new('GeometryNodeBoundBox')
+    bbox.location = (x, y - 250)
+
+    extent = ng.nodes.new('ShaderNodeVectorMath')
+    extent.location = (x + 200, y - 250)
+    extent.operation = 'SUBTRACT'
+
+    sep_ext = ng.nodes.new('ShaderNodeSeparateXYZ')
+    sep_ext.location = (x + 400, y - 250)
+
+    link(geometry_out, bbox.inputs['Geometry'])
+    link(bbox.outputs['Max'], extent.inputs[0])
+    link(bbox.outputs['Min'], extent.inputs[1])
+    link(extent.outputs['Vector'], sep_ext.inputs['Vector'])
+
+    # --- detect thinnest axis ---
+    # x_thin = (ext_x <= ext_y) AND (ext_x <= ext_z)
+    cmp_xy = ng.nodes.new('FunctionNodeCompare')
+    cmp_xy.location = (x + 600, y - 150)
+    cmp_xy.data_type = 'FLOAT'
+    cmp_xy.operation = 'LESS_EQUAL'
+
+    cmp_xz = ng.nodes.new('FunctionNodeCompare')
+    cmp_xz.location = (x + 600, y - 300)
+    cmp_xz.data_type = 'FLOAT'
+    cmp_xz.operation = 'LESS_EQUAL'
+
+    x_thin = ng.nodes.new('FunctionNodeBooleanMath')
+    x_thin.location = (x + 800, y - 200)
+    x_thin.operation = 'AND'
+
+    link(sep_ext.outputs['X'], cmp_xy.inputs['A'])
+    link(sep_ext.outputs['Y'], cmp_xy.inputs['B'])
+    link(sep_ext.outputs['X'], cmp_xz.inputs['A'])
+    link(sep_ext.outputs['Z'], cmp_xz.inputs['B'])
+    link(cmp_xy.outputs['Result'], x_thin.inputs[0])
+    link(cmp_xz.outputs['Result'], x_thin.inputs[1])
+
+    # y_thin = (ext_y < ext_x) AND (ext_y <= ext_z)
+    cmp_yx = ng.nodes.new('FunctionNodeCompare')
+    cmp_yx.location = (x + 600, y - 450)
+    cmp_yx.data_type = 'FLOAT'
+    cmp_yx.operation = 'LESS_THAN'
+
+    cmp_yz = ng.nodes.new('FunctionNodeCompare')
+    cmp_yz.location = (x + 600, y - 600)
+    cmp_yz.data_type = 'FLOAT'
+    cmp_yz.operation = 'LESS_EQUAL'
+
+    y_thin = ng.nodes.new('FunctionNodeBooleanMath')
+    y_thin.location = (x + 800, y - 500)
+    y_thin.operation = 'AND'
+
+    link(sep_ext.outputs['Y'], cmp_yx.inputs['A'])
+    link(sep_ext.outputs['X'], cmp_yx.inputs['B'])
+    link(sep_ext.outputs['Y'], cmp_yz.inputs['A'])
+    link(sep_ext.outputs['Z'], cmp_yz.inputs['B'])
+    link(cmp_yx.outputs['Result'], y_thin.inputs[0])
+    link(cmp_yz.outputs['Result'], y_thin.inputs[1])
+
+    # --- position components ---
+    pos = ng.nodes.new('GeometryNodeInputPosition')
+    pos.location = (x, y + 100)
+
+    sep_pos = ng.nodes.new('ShaderNodeSeparateXYZ')
+    sep_pos.location = (x + 200, y + 100)
+
+    link(pos.outputs['Position'], sep_pos.inputs['Vector'])
+
+    # --- build remapped positions ---
+    # X thinnest → (Y, Z, 0)
+    pos_x = ng.nodes.new('ShaderNodeCombineXYZ')
+    pos_x.location = (x + 800, y + 200)
+    link(sep_pos.outputs['Y'], pos_x.inputs['X'])
+    link(sep_pos.outputs['Z'], pos_x.inputs['Y'])
+
+    # Y thinnest → (X, Z, 0)
+    pos_y = ng.nodes.new('ShaderNodeCombineXYZ')
+    pos_y.location = (x + 800, y + 50)
+    link(sep_pos.outputs['X'], pos_y.inputs['X'])
+    link(sep_pos.outputs['Z'], pos_y.inputs['Y'])
+
+    # Z thinnest → (X, Y, 0)
+    pos_z = ng.nodes.new('ShaderNodeCombineXYZ')
+    pos_z.location = (x + 800, y - 100)
+    link(sep_pos.outputs['X'], pos_z.inputs['X'])
+    link(sep_pos.outputs['Y'], pos_z.inputs['Y'])
+
+    # --- switches to pick the right remap ---
+    # inner switch: y_thin ? pos_y : pos_z
+    sw_yz = ng.nodes.new('GeometryNodeSwitch')
+    sw_yz.location = (x + 1000, y - 50)
+    sw_yz.input_type = 'VECTOR'
+    link(y_thin.outputs['Boolean'], sw_yz.inputs['Switch'])
+    link(pos_z.outputs['Vector'], sw_yz.inputs['False'])
+    link(pos_y.outputs['Vector'], sw_yz.inputs['True'])
+
+    # outer switch: x_thin ? pos_x : sw_yz
+    sw_final = ng.nodes.new('GeometryNodeSwitch')
+    sw_final.location = (x + 1200, y + 100)
+    sw_final.input_type = 'VECTOR'
+    link(x_thin.outputs['Boolean'], sw_final.inputs['Switch'])
+    link(sw_yz.outputs['Output'], sw_final.inputs['False'])
+    link(pos_x.outputs['Vector'], sw_final.inputs['True'])
+
+    # --- apply ---
+    set_pos = ng.nodes.new('GeometryNodeSetPosition')
+    set_pos.location = (x + 1400, y)
+    link(geometry_out, set_pos.inputs['Geometry'])
+    link(sw_final.outputs['Output'], set_pos.inputs['Position'])
+
+    return set_pos.outputs['Geometry']
+
+
 def get_or_create_path_node_group():
     """Get existing or build the Path Mesh geometry node group.
 
@@ -164,28 +296,48 @@ def get_or_create_path_node_group():
         cyclic=True, x=-800, y=200,
     )
     centered_profile = _add_center_offset(ng, link, profile_out, x=0, y=200)
+    flattened_profile = _add_flatten_profile(ng, link, centered_profile, x=1100, y=200)
 
-    # Path branch (open curve)
-    path_out = _add_gp_branch(
-        ng, link, group_in, PATH_LAYER_NAME, 'Path Resolution',
-        cyclic=False, x=-800, y=-200,
-    )
+    # Path branch: GP → Curves → Fillet → Resample
+    # (Fillet must come before Resample so it rounds actual corners, not every point)
+    path_x = -800
+    path_y = -200
+
+    path_sel = ng.nodes.new('GeometryNodeInputNamedLayerSelection')
+    path_sel.location = (path_x, path_y)
+    path_sel.inputs['Name'].default_value = PATH_LAYER_NAME
+
+    path_gp = ng.nodes.new('GeometryNodeGreasePencilToCurves')
+    path_gp.location = (path_x + 200, path_y)
+    path_gp.inputs['Layers as Instances'].default_value = False
+
+    fillet = ng.nodes.new('GeometryNodeFilletCurve')
+    fillet.location = (path_x + 400, path_y)
+    fillet.inputs['Mode'].default_value = 'Poly'
+
+    path_resample = ng.nodes.new('GeometryNodeResampleCurve')
+    path_resample.location = (path_x + 600, path_y)
+
+    link(group_in.outputs['Geometry'], path_gp.inputs['Grease Pencil'])
+    link(path_sel.outputs['Selection'], path_gp.inputs['Selection'])
+    link(path_gp.outputs['Curves'], fillet.inputs['Curve'])
+    link(group_in.outputs['Corner Radius'], fillet.inputs['Radius'])
+    link(group_in.outputs['Corner Resolution'], fillet.inputs['Count'])
+    link(fillet.outputs['Curve'], path_resample.inputs['Curve'])
+    link(group_in.outputs['Path Resolution'], path_resample.inputs['Count'])
+    path_out = path_resample.outputs['Curve']
 
     # Sweep profile along path
     curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
-    curve_to_mesh.location = (1200, 0)
-
-    shade = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade.location = (1400, 0)
+    curve_to_mesh.location = (1800, 0)
 
     group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (1600, 0)
+    group_out.location = (2000, 0)
 
     link(path_out, curve_to_mesh.inputs['Curve'])
-    link(centered_profile, curve_to_mesh.inputs['Profile Curve'])
+    link(flattened_profile, curve_to_mesh.inputs['Profile Curve'])
     link(group_in.outputs['Fill Caps'], curve_to_mesh.inputs['Fill Caps'])
-    link(curve_to_mesh.outputs['Mesh'], shade.inputs['Mesh'])
-    link(shade.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(curve_to_mesh.outputs['Mesh'], group_out.inputs['Geometry'])
 
     return ng
 
@@ -202,17 +354,6 @@ def _show_properties_tab(context, tab):
     except TypeError:
         pass
 
-
-def _set_topdown_view(context):
-    """Switch the 3D viewport to top-down orthographic view."""
-    from mathutils import Quaternion
-    for area in context.screen.areas:
-        if area.type == 'VIEW_3D':
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    space.region_3d.view_perspective = 'ORTHO'
-                    space.region_3d.view_rotation = Quaternion((1, 0, 0, 0))
-                    return
 
 
 class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
@@ -247,10 +388,9 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
         if not has_profile:
             _show_properties_tab(context, 'DATA')
             gp_data.layers.active = profile
-            _set_topdown_view(context)
             self.report(
                 {"WARNING"},
-                "Draw the profile shape from top view, then click Path Mesh again.",
+                "Draw the profile shape, then click Path Mesh again.",
             )
             return {"CANCELLED"}
 
@@ -282,4 +422,7 @@ def register():
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass

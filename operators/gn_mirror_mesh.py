@@ -171,15 +171,10 @@ def get_or_create_mirror_node_group():
     prev = _add_position_restore(ng, link, prev, bbox_min, x)
     x += 600
 
-    # Shade smooth → output
-    shade = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade.location = (x + 200, 0)
-
     group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (x + 400, 0)
+    group_out.location = (x + 200, 0)
 
-    link(prev, shade.inputs['Mesh'])
-    link(shade.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(prev, group_out.inputs['Geometry'])
 
     return ng
 
@@ -232,4 +227,7 @@ def register():
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass

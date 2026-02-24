@@ -122,12 +122,7 @@ def get_or_create_solid_node_group():
     merge_final.location = (x + 200, 0)
     merge_final.inputs['Distance'].default_value = 0.001
 
-    # Smooth shading
     x += 400
-    shade = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade.location = (x, 0)
-
-    x += 200
     group_out = ng.nodes.new('NodeGroupOutput')
     group_out.location = (x, 0)
 
@@ -164,8 +159,7 @@ def get_or_create_solid_node_group():
     link(extrude.outputs['Mesh'], join.inputs['Geometry'])
     link(flip.outputs['Mesh'], join.inputs['Geometry'])
     link(join.outputs['Geometry'], merge_final.inputs['Geometry'])
-    link(merge_final.outputs['Geometry'], shade.inputs['Mesh'])
-    link(shade.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(merge_final.outputs['Geometry'], group_out.inputs['Geometry'])
 
     return ng
 
@@ -222,4 +216,7 @@ def register():
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass

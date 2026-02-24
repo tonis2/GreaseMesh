@@ -127,11 +127,6 @@ def get_or_create_wall_node_group():
     curve_to_mesh.location = (x, 0)
     curve_to_mesh.inputs['Fill Caps'].default_value = True
 
-    # Smooth shading
-    x += 200
-    shade = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade.location = (x, 0)
-
     x += 200
     group_out = ng.nodes.new('NodeGroupOutput')
     group_out.location = (x, 0)
@@ -166,9 +161,7 @@ def get_or_create_wall_node_group():
     link(set_normal.outputs['Curve'], curve_to_mesh.inputs['Curve'])
     link(set_pos.outputs['Geometry'], curve_to_mesh.inputs['Profile Curve'])
 
-    # Shade smooth → Output
-    link(curve_to_mesh.outputs['Mesh'], shade.inputs['Mesh'])
-    link(shade.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(curve_to_mesh.outputs['Mesh'], group_out.inputs['Geometry'])
 
     return ng
 
@@ -225,4 +218,7 @@ def register():
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
