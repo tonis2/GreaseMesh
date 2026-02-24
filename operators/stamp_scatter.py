@@ -72,15 +72,14 @@ def _compute_x_mark_centers(gp_obj, merge_distance, layer_name=None):
 
 
 def get_or_create_scatter_node_group():
-    """Reusable GN sub-group that instances a collection at input points.
+    """Reusable GN sub-group that instances an object at input points.
 
     Pipeline:
-      Points → CollectionInfo → InstanceOnPoints (random pick)
+      Points → ObjectInfo → InstanceOnPoints (random pick)
         → RotateInstances (random Z OR surface-aligned) → ScaleInstances → Output
 
-    When Align to Surface is enabled with a Target Object, instances are
-    rotated to face outward from the target surface (Y axis aligned to
-    surface normal, Z stays up). Otherwise, random Z rotation is used.
+    The Mesh input accepts a single mesh object or a collection-instance empty.
+    Pick Instance is enabled so collection-instance empties randomly pick children.
 
     Cached by name — shared across all scatter operations.
     """
@@ -95,8 +94,16 @@ def get_or_create_scatter_node_group():
         name="Points", in_out='INPUT', socket_type='NodeSocketGeometry',
     )
     ng.interface.new_socket(
-        name="Collection", in_out='INPUT', socket_type='NodeSocketCollection',
+        name="Mesh", in_out='INPUT', socket_type='NodeSocketObject',
     )
+    ng.interface.new_socket(
+        name="Target Object", in_out='INPUT', socket_type='NodeSocketObject',
+    )
+    align_sock = ng.interface.new_socket(
+        name="Align to Surface", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    align_sock.default_value = False
+
     scale_sock = ng.interface.new_socket(
         name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
     )
@@ -112,14 +119,6 @@ def get_or_create_scatter_node_group():
     seed_sock.max_value = 10000
 
     ng.interface.new_socket(
-        name="Target Object", in_out='INPUT', socket_type='NodeSocketObject',
-    )
-    align_sock = ng.interface.new_socket(
-        name="Align to Surface", in_out='INPUT', socket_type='NodeSocketBool',
-    )
-    align_sock.default_value = False
-
-    ng.interface.new_socket(
         name="Instances", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
 
@@ -128,24 +127,15 @@ def get_or_create_scatter_node_group():
     group_in = ng.nodes.new('NodeGroupInput')
     group_in.location = (x, 0)
 
-    # Collection Info
+    # Object Info (for mesh or collection-instance empty)
     x += 200
-    coll_info = ng.nodes.new('GeometryNodeCollectionInfo')
-    coll_info.location = (x, -300)
-    coll_info.transform_space = 'RELATIVE'
-    coll_info.inputs['Separate Children'].default_value = True
-    coll_info.inputs['Reset Children'].default_value = True
+    mesh_info = ng.nodes.new('GeometryNodeObjectInfo')
+    mesh_info.location = (x, -300)
+    mesh_info.transform_space = 'ORIGINAL'
 
     # Index for per-point randomization
     index_node = ng.nodes.new('GeometryNodeInputIndex')
     index_node.location = (x, -150)
-
-    # Random integer for picking which collection object
-    rand_pick = ng.nodes.new('FunctionNodeRandomValue')
-    rand_pick.location = (x + 100, -200)
-    rand_pick.data_type = 'INT'
-    rand_pick.inputs[4].default_value = 0      # Min (INT)
-    rand_pick.inputs[5].default_value = 99999  # Max (INT)
 
     # --- Surface alignment branch ---
     # ObjectInfo for target surface
@@ -176,7 +166,7 @@ def get_or_create_scatter_node_group():
     x += 400
     inst_on_pts = ng.nodes.new('GeometryNodeInstanceOnPoints')
     inst_on_pts.location = (x, 0)
-    inst_on_pts.inputs['Pick Instance'].default_value = True
+    inst_on_pts.inputs['Pick Instance'].default_value = False
 
     # Seed + 1 for different random stream for rotation
     seed_offset = ng.nodes.new('ShaderNodeMath')
@@ -222,12 +212,8 @@ def get_or_create_scatter_node_group():
     # --- Links ---
     link = ng.links.new
 
-    # Collection
-    link(group_in.outputs['Collection'], coll_info.inputs['Collection'])
-
-    # Random pick
-    link(index_node.outputs['Index'], rand_pick.inputs['ID'])
-    link(group_in.outputs['Seed'], rand_pick.inputs['Seed'])
+    # Mesh object
+    link(group_in.outputs['Mesh'], mesh_info.inputs['Object'])
 
     # Surface alignment: ObjectInfo → SampleNearestSurface → AlignRotationToVector
     link(group_in.outputs['Target Object'], obj_info.inputs['Object'])
@@ -241,8 +227,7 @@ def get_or_create_scatter_node_group():
 
     # Instance on Points
     link(group_in.outputs['Points'], inst_on_pts.inputs['Points'])
-    link(coll_info.outputs['Instances'], inst_on_pts.inputs['Instance'])
-    link(rand_pick.outputs[2], inst_on_pts.inputs['Instance Index'])
+    link(mesh_info.outputs['Geometry'], inst_on_pts.inputs['Instance'])
 
     # Random rotation
     link(group_in.outputs['Seed'], seed_offset.inputs[0])
@@ -272,133 +257,12 @@ def get_or_create_scatter_node_group():
     return ng
 
 
-def _build_wrapper_node_tree(gp_name, layer_names):
-    """Build a per-object wrapper node tree that filters by stamp_layer
-    and routes each layer's points to a GreaseMesh_StampScatter sub-group.
-
-    Wrapper interface:
-      Geometry (in) | {layer_name} Collection (in, per layer) |
-      Scale (in) | Seed (in) | Geometry (out)
-    """
-    tree_name = f"StampScatter_{gp_name}"
-
-    # Remove existing wrapper with same name
-    existing = bpy.data.node_groups.get(tree_name)
-    if existing is not None:
-        bpy.data.node_groups.remove(existing)
-
-    ng = bpy.data.node_groups.new(name=tree_name, type='GeometryNodeTree')
-
-    # --- Interface ---
-    ng.interface.new_socket(
-        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry',
-    )
-    ng.interface.new_socket(
-        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
-    )
-
-    for layer_name in layer_names:
-        ng.interface.new_socket(
-            name=layer_name, in_out='INPUT', socket_type='NodeSocketCollection',
-        )
-
-    ng.interface.new_socket(
-        name="Target Object", in_out='INPUT', socket_type='NodeSocketObject',
-    )
-    align_sock = ng.interface.new_socket(
-        name="Align to Surface", in_out='INPUT', socket_type='NodeSocketBool',
-    )
-    align_sock.default_value = False
-
-    scale_sock = ng.interface.new_socket(
-        name="Scale", in_out='INPUT', socket_type='NodeSocketFloat',
-    )
-    scale_sock.default_value = 1.0
-    scale_sock.min_value = 0.01
-    scale_sock.max_value = 10.0
-
-    seed_sock = ng.interface.new_socket(
-        name="Seed", in_out='INPUT', socket_type='NodeSocketInt',
-    )
-    seed_sock.default_value = 0
-    seed_sock.min_value = 0
-    seed_sock.max_value = 10000
-
-    # --- Shared nodes ---
-    x_start = -800
-    group_in = ng.nodes.new('NodeGroupInput')
-    group_in.location = (x_start, 0)
-
-    group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (1200, 0)
-
-    # Named attribute: stamp_layer (INT)
-    named_attr = ng.nodes.new('GeometryNodeInputNamedAttribute')
-    named_attr.location = (x_start + 200, -200)
-    named_attr.data_type = 'INT'
-    named_attr.inputs['Name'].default_value = "stamp_layer"
-
-    # Join Geometry — collects all branch outputs
-    join_geo = ng.nodes.new('GeometryNodeJoinGeometry')
-    join_geo.location = (1000, 0)
-
-    link = ng.links.new
-    link(join_geo.outputs['Geometry'], group_out.inputs['Geometry'])
-
-    # Ensure the reusable sub-group exists
-    scatter_ng = get_or_create_scatter_node_group()
-
-    # --- Per-layer branches ---
-    y_offset = 0
-    for layer_idx, layer_name in enumerate(layer_names):
-        bx = -400
-        by = y_offset
-
-        # Compare: stamp_layer == layer_idx
-        compare = ng.nodes.new('FunctionNodeCompare')
-        compare.location = (bx, by)
-        compare.data_type = 'INT'
-        compare.operation = 'EQUAL'
-        compare.inputs['B'].default_value = layer_idx
-        link(named_attr.outputs['Attribute'], compare.inputs['A'])
-
-        # Separate Geometry
-        bx += 200
-        sep_geo = ng.nodes.new('GeometryNodeSeparateGeometry')
-        sep_geo.location = (bx, by)
-        link(group_in.outputs['Geometry'], sep_geo.inputs['Geometry'])
-        link(compare.outputs['Result'], sep_geo.inputs['Selection'])
-
-        # Sub-group: GreaseMesh_StampScatter
-        bx += 200
-        sub_group = ng.nodes.new('GeometryNodeGroup')
-        sub_group.location = (bx, by)
-        sub_group.node_tree = scatter_ng
-        sub_group.label = layer_name
-
-        # Wire sub-group inputs
-        link(sep_geo.outputs['Selection'], sub_group.inputs['Points'])
-        link(group_in.outputs[layer_name], sub_group.inputs['Collection'])
-        link(group_in.outputs['Scale'], sub_group.inputs['Scale'])
-        link(group_in.outputs['Seed'], sub_group.inputs['Seed'])
-        link(group_in.outputs['Target Object'], sub_group.inputs['Target Object'])
-        link(group_in.outputs['Align to Surface'], sub_group.inputs['Align to Surface'])
-
-        # Wire sub-group output to join
-        link(sub_group.outputs['Instances'], join_geo.inputs['Geometry'])
-
-        y_offset -= 400
-
-    return ng
-
 
 class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
-    """Scatter collection assets at GP X-mark locations on a surface.
+    """Scatter mesh objects at GP X-mark locations.
 
-    Computes AABB centers per layer, creates a scatter mesh with stamp_layer
-    attribute, and adds a GN modifier with per-layer Collection inputs.
-    The instancing logic lives in a reusable GreaseMesh_StampScatter sub-group
-    visible in the GN editor.
+    Computes AABB centers per layer, creates one scatter object per layer,
+    and adds a GreaseMesh_StampScatter GN modifier with a Mesh Object picker.
     """
 
     bl_idname = "gptools.stamp_scatter"
@@ -434,42 +298,31 @@ class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
             self.report({"ERROR"}, "No marks found in Grease Pencil strokes")
             return {"CANCELLED"}
 
-        # Build scatter mesh with all vertices + stamp_layer attribute
-        all_verts = []
-        layer_indices = []
-        for idx, (layer_name, centers) in enumerate(layers_data):
-            for c in centers:
-                all_verts.append(c[:])
-                layer_indices.append(idx)
+        # Ensure the reusable sub-group exists
+        scatter_ng = get_or_create_scatter_node_group()
 
-        mesh = bpy.data.meshes.new(f"StampScatter_{gp_obj.name}")
-        mesh.from_pydata(all_verts, [], [])
-        mesh.update()
+        # Create one scatter object per layer with the sub-group directly
+        scatter_objs = []
+        for layer_name, centers in layers_data:
+            verts = [c[:] for c in centers]
+            mesh = bpy.data.meshes.new(f"{layer_name}_Scatter_{gp_obj.name}")
+            mesh.from_pydata(verts, [], [])
+            mesh.update()
 
-        attr = mesh.attributes.new(name="stamp_layer", type='INT', domain='POINT')
-        for i, val in enumerate(layer_indices):
-            attr.data[i].value = val
+            scatter_obj = bpy.data.objects.new(mesh.name, mesh)
+            for col in gp_obj.users_collection:
+                col.objects.link(scatter_obj)
+            layer_ng = scatter_ng.copy()
+            layer_ng.name = f"{layer_name}_Scatter"
+            mod = scatter_obj.modifiers.new(name="Scatter", type='NODES')
+            mod.node_group = layer_ng
+            scatter_objs.append(scatter_obj)
 
-        scatter_obj = bpy.data.objects.new(f"StampScatter_{gp_obj.name}", mesh)
-        for col in gp_obj.users_collection:
-            col.objects.link(scatter_obj)
-
-        # Build wrapper node tree and add modifier
-        layer_names = [name for name, _ in layers_data]
-        wrapper_ng = _build_wrapper_node_tree(gp_obj.name, layer_names)
-        mod = scatter_obj.modifiers.new(name="StampScatter", type='NODES')
-        mod.node_group = wrapper_ng
-
-        # Auto-assign collections that match layer names
-        items = mod.node_group.interface.items_tree
-        for layer_name in layer_names:
-            coll = bpy.data.collections.get(layer_name)
-            if coll is not None:
-                mod[items[layer_name].identifier] = coll
-
-        # Select the scatter object
-        context.view_layer.objects.active = scatter_obj
-        scatter_obj.select_set(True)
+        # Select the last scatter object
+        last = scatter_objs[-1]
+        context.view_layer.objects.active = last
+        for obj in scatter_objs:
+            obj.select_set(True)
         gp_obj.select_set(False)
 
         # Switch Properties panel to Modifiers tab
@@ -484,7 +337,7 @@ class GPTOOLS_OT_stamp_scatter(bpy.types.Operator):
         except TypeError:
             pass
 
-        total = len(all_verts)
+        total = sum(len(centers) for _, centers in layers_data)
         layer_info = ", ".join(
             f"{name} ({len(centers)})" for name, centers in layers_data
         )

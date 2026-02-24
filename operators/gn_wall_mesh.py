@@ -127,6 +127,12 @@ def get_or_create_wall_node_group():
     curve_to_mesh.location = (x, 0)
     curve_to_mesh.inputs['Fill Caps'].default_value = True
 
+    # Force flat shading (Curve to Mesh outputs smooth by default)
+    x += 200
+    shade_flat = ng.nodes.new('GeometryNodeSetShadeSmooth')
+    shade_flat.location = (x, 0)
+    shade_flat.inputs['Shade Smooth'].default_value = False
+
     x += 200
     group_out = ng.nodes.new('NodeGroupOutput')
     group_out.location = (x, 0)
@@ -161,7 +167,8 @@ def get_or_create_wall_node_group():
     link(set_normal.outputs['Curve'], curve_to_mesh.inputs['Curve'])
     link(set_pos.outputs['Geometry'], curve_to_mesh.inputs['Profile Curve'])
 
-    link(curve_to_mesh.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(curve_to_mesh.outputs['Mesh'], shade_flat.inputs['Mesh'])
+    link(shade_flat.outputs['Mesh'], group_out.inputs['Geometry'])
 
     return ng
 

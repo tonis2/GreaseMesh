@@ -276,7 +276,7 @@ def get_or_create_path_node_group():
     Pipeline:
       Profile: GP → Named Layer Selection → GP to Curves → Resample → Cyclic → Center
       Path:    GP → Named Layer Selection → GP to Curves → Resample
-      Curve to Mesh(path, centered_profile, Fill Caps) → Shade Smooth → Output
+      Curve to Mesh(path, centered_profile, Fill Caps) → Output
     """
     ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
     if ng is not None:
@@ -331,13 +331,19 @@ def get_or_create_path_node_group():
     curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
     curve_to_mesh.location = (1800, 0)
 
+    # Force flat shading (Curve to Mesh outputs smooth by default)
+    shade_flat = ng.nodes.new('GeometryNodeSetShadeSmooth')
+    shade_flat.location = (2000, 0)
+    shade_flat.inputs['Shade Smooth'].default_value = False
+
     group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (2000, 0)
+    group_out.location = (2200, 0)
 
     link(path_out, curve_to_mesh.inputs['Curve'])
     link(flattened_profile, curve_to_mesh.inputs['Profile Curve'])
     link(group_in.outputs['Fill Caps'], curve_to_mesh.inputs['Fill Caps'])
-    link(curve_to_mesh.outputs['Mesh'], group_out.inputs['Geometry'])
+    link(curve_to_mesh.outputs['Mesh'], shade_flat.inputs['Mesh'])
+    link(shade_flat.outputs['Mesh'], group_out.inputs['Geometry'])
 
     return ng
 
