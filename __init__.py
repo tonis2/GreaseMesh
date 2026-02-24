@@ -15,7 +15,6 @@ import sys
 
 # List of modules to reload during development
 modules = [
-    "grease_mesh.properties",
     "grease_mesh.panels",
     "grease_mesh.utils.conversion",
     "grease_mesh.operators.add_gpencil",
@@ -64,7 +63,7 @@ def reload_modules():
 
 
 # Import modules
-from . import properties, panels
+from . import panels
 from .operators import (
     add_gpencil,
     gn_solid_mesh,
@@ -81,7 +80,6 @@ from .operators import (
 )
 
 registration_modules = [
-    properties,
     panels,
     add_gpencil,
     gn_solid_mesh,

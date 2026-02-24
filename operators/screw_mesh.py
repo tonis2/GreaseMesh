@@ -116,7 +116,6 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        props = context.scene.gptools
         gp_name = gp_obj.name
 
         mesh_obj, mesh_data = build_profile_mesh(context, gp_obj)
@@ -130,8 +129,8 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
 
         # Add native Blender Screw modifier
         screw = mesh_obj.modifiers.new(name="Screw", type="SCREW")
-        screw.steps = props.screw_segments
-        screw.render_steps = props.screw_segments
+        screw.steps = 32
+        screw.render_steps = 32
         screw.axis = detected_axis
         screw.angle = math.tau
         screw.use_merge_vertices = True
@@ -183,7 +182,6 @@ class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        props = context.scene.gptools
         gp_name = gp_obj.name
 
         mesh_obj, mesh_data = build_profile_mesh(context, gp_obj)

@@ -11,7 +11,6 @@ class GPTOOLS_PT_main(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        props = context.scene.gptools
 
         # Create Section
         box = layout.box()

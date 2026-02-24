@@ -28,8 +28,7 @@ class GPTOOLS_OT_lattice_wrap(bpy.types.Operator):
             if o != target_obj and o.type == "MESH"
         )
 
-        props = context.scene.gptools
-        resolution = props.lattice_resolution
+        resolution = 10
 
         # Compute local-space bounding box
         bb = source_obj.bound_box
