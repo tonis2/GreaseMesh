@@ -28,7 +28,6 @@ modules = [
     "grease_mesh.operators.array_on_curve",
     "grease_mesh.operators.apply_modifiers",
     "grease_mesh.operators.stamp_scatter",
-    "grease_mesh.operators.dev_reload",
 ]
 
 
@@ -76,7 +75,6 @@ from .operators import (
     array_on_curve,
     apply_modifiers,
     stamp_scatter,
-    dev_reload,
 )
 
 registration_modules = [
@@ -92,7 +90,6 @@ registration_modules = [
     array_on_curve,
     apply_modifiers,
     stamp_scatter,
-    dev_reload,
 ]
 
 

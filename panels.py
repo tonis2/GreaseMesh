@@ -1,5 +1,4 @@
 import bpy
-import os
 
 
 class GPTOOLS_PT_main(bpy.types.Panel):
@@ -34,9 +33,6 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         box.label(text="Screw Mesh", icon="MOD_SCREW")
         col = box.column(align=True)
         col.operator("gptools.screw_mesh", text="Screw", icon="MOD_SCREW")
-        col.operator(
-            "gptools.square_screw_mesh", text="Square Screw", icon="MESH_PLANE"
-        )
 
         # Other Section
         box = layout.box()
@@ -51,14 +47,6 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         )
         grid.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
 
-        # Dev Section — only visible when running from a local dev path
-        addon_dir = os.path.dirname(os.path.realpath(__file__))
-        if "extensions" not in addon_dir:
-            box = layout.box()
-            box.label(text="Development", icon="SCRIPT")
-            box.operator(
-                "gptools.reload_addon", text="Reload Addon", icon="FILE_REFRESH"
-            )
 
 
 classes = [

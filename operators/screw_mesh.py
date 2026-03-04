@@ -165,80 +165,8 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class GPTOOLS_OT_square_screw_mesh(bpy.types.Operator):
-    """Create square screw (lathe) mesh from Grease Pencil profile"""
-
-    bl_idname = "gptools.square_screw_mesh"
-    bl_label = "Create Square Screw Mesh"
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context):
-        return get_active_grease_pencil(context) is not None
-
-    def execute(self, context):
-        gp_obj = get_active_grease_pencil(context)
-        if not gp_obj:
-            self.report({"ERROR"}, "No active Grease Pencil found")
-            return {"CANCELLED"}
-
-        gp_name = gp_obj.name
-
-        mesh_obj, mesh_data = build_profile_mesh(context, gp_obj)
-        if mesh_obj is None:
-            self.report({"ERROR"}, "Need at least 2 points in Grease Pencil")
-            return {"CANCELLED"}
-
-        # Auto-detect revolution axis and move origin to centerline
-        detected_axis, origin_vec = detect_revolution_axis(mesh_data, gp_obj)
-        mesh_obj.location = origin_vec
-
-        # Rotate 45° on Z and scale up to compensate for square shape
-        mesh_obj.rotation_euler[2] = math.radians(45)
-        mesh_obj.scale[0] = 1.4
-        mesh_obj.scale[1] = 1.4
-
-        # Add Screw modifier with 4 steps for square cross-section
-        screw = mesh_obj.modifiers.new(name="Screw", type="SCREW")
-        screw.steps = 4
-        screw.render_steps = 4
-        screw.axis = detected_axis
-        screw.angle = math.tau
-        screw.use_merge_vertices = True
-        screw.merge_threshold = 0.0001
-
-        # Decimate modifier
-        decimate = mesh_obj.modifiers.new(name="Decimate", type="DECIMATE")
-        decimate.ratio = 0.5
-
-        # Select and activate
-        context.view_layer.objects.active = mesh_obj
-        mesh_obj.select_set(True)
-
-
-        # Delete original GP
-        if gp_name in bpy.data.objects:
-            bpy.data.objects.remove(bpy.data.objects[gp_name], do_unlink=True)
-
-        # Switch Properties panel to Modifiers tab
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'MODIFIER'
-                            break
-                    break
-        except TypeError:
-            pass
-
-        self.report({"INFO"}, "Square screw mesh created.")
-        return {"FINISHED"}
-
-
 classes = [
     GPTOOLS_OT_screw_mesh,
-    GPTOOLS_OT_square_screw_mesh,
 ]
 
 
