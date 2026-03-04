@@ -7,7 +7,7 @@ Located in **3D Viewport > N-Panel > GPTools**.
 ## Features
 
 ### Create
-- **Add New Grease Pencil** — Creates a new Grease Pencil object ready for drawing.
+- **Add New Grease Pencil** — Creates a new Grease Pencil object and enters Draw mode automatically.
 - **Apply All Modifiers** — Bakes all modifiers on the selected object into the geometry.
 
 ### Mesh from GP (Geometry Nodes)
@@ -16,6 +16,7 @@ Non-destructive GP-to-mesh conversion powered by Geometry Nodes. The Grease Penc
 - **Solid Mesh** — Fills drawn shapes and extrudes them into solid 3D objects with adjustable thickness.
 - **Mirror Mesh** — Creates a mirrored solid mesh from a drawn half-shape. Draw one side, get both.
 - **Path Mesh** — Sweeps a cross-section profile along a drawn path. Draw the path on one layer, the profile on another.
+- **Wall Mesh** — Generates a wall mesh from drawn strokes.
 
 ### Boolean
 - **Bool Cut** — Draw a shape on a mesh surface with GP (Surface stroke placement), then cut it out with a boolean. Adjust cut depth and resolution in the popup dialog.
@@ -23,7 +24,10 @@ Non-destructive GP-to-mesh conversion powered by Geometry Nodes. The Grease Penc
 ### Screw Mesh
 Revolve a drawn profile into a 3D shape (vases, columns, turned objects).
 - **Screw** — Revolves a drawn profile 360° with configurable segments. Auto-detects the revolution axis and centerline from the drawing.
-- **Square Screw** — Same as Screw but with 4 steps for a square cross-section.
+
+### Array on Pencil
+Array objects along a Grease Pencil stroke path.
+- **Array on Pencil** — Distributes copies of the selected mesh along a drawn GP path using an Array and Curve modifier.
 
 ### Stamp Scatter
 Scatter assets from a collection onto mesh surfaces using Grease Pencil marks. Perfect for placing windows, doors, props, or decorations on walls.
@@ -58,7 +62,7 @@ Useful for wrapping decorative elements onto curved surfaces like columns, domes
 - **Solid Mesh**: Draw closed shapes for best results. Adjust thickness in the modifier panel.
 - **Mirror Mesh**: Draw one half of a symmetrical shape. The flat edge aligns to the mirror axis automatically.
 - **Path Mesh**: Draw the sweep path first, then draw the cross-section profile on the second layer. Switch layers in Properties > Data.
-- **Bool Cut**: Target mesh must be solid (has wall thickness). Thin shells from Screw need a Solidify modifier applied first.
+- **Bool Cut**: Target mesh must be solid (has wall thickness).
 - **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Lattice Wrap**: Add subdivisions to the source mesh before wrapping for smoother results. Adjust the **Resolution** slider to control lattice detail.
 - **Stamp Scatter**: Short GP strokes work best for precise placement. The addon samples points along each stroke and raycasts downward to find the surface. Use lower **Point Spacing** for dense scatter along lines (like placing fence posts).
