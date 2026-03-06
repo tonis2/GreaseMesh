@@ -135,6 +135,7 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         screw.angle = math.tau
         screw.use_merge_vertices = True
         screw.merge_threshold = 0.0001
+        screw.use_normal_calculate = True
 
         # Decimate modifier
         decimate = mesh_obj.modifiers.new(name="Decimate", type="DECIMATE")
@@ -144,6 +145,8 @@ class GPTOOLS_OT_screw_mesh(bpy.types.Operator):
         context.view_layer.objects.active = mesh_obj
         mesh_obj.select_set(True)
 
+        # Shade auto smooth (adds "Smooth by Angle" GN modifier)
+        bpy.ops.object.shade_auto_smooth()
 
         # Delete original GP
         if gp_name in bpy.data.objects:
