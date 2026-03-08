@@ -2,11 +2,11 @@ import bpy
 
 
 class GPTOOLS_PT_main(bpy.types.Panel):
-    bl_label = "GPTools"
+    bl_label = "GMesh"
     bl_idname = "GPTOOLS_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "GPTools"
+    bl_category = "GMesh"
 
     def draw(self, context):
         layout = self.layout

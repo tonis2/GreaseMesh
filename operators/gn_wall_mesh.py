@@ -55,6 +55,20 @@ def get_or_create_wall_node_group():
     merge_sock.min_value = 0.001
     merge_sock.max_value = 10.0
 
+    corner_r = ng.interface.new_socket(
+        name="Corner Radius", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    corner_r.default_value = 0.1
+    corner_r.min_value = 0.0
+    corner_r.max_value = 10.0
+
+    corner_res = ng.interface.new_socket(
+        name="Corner Resolution", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    corner_res.default_value = 4
+    corner_res.min_value = 1
+    corner_res.max_value = 32
+
     ng.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
 
     # --- Nodes ---
@@ -82,6 +96,12 @@ def get_or_create_wall_node_group():
     x += 200
     mesh_to_curve = ng.nodes.new('GeometryNodeMeshToCurve')
     mesh_to_curve.location = (x, 0)
+
+    # Fillet corners before resampling
+    x += 200
+    fillet = ng.nodes.new('GeometryNodeFilletCurve')
+    fillet.location = (x, 0)
+    fillet.inputs['Mode'].default_value = 'Poly'
 
     # Resample to uniform point count
     x += 200
@@ -147,8 +167,11 @@ def get_or_create_wall_node_group():
     link(group_in.outputs['Merge Distance'], merge.inputs['Distance'])
     link(merge.outputs['Geometry'], mesh_to_curve.inputs['Mesh'])
 
-    # Resample → Cyclic
-    link(mesh_to_curve.outputs['Curve'], resample.inputs['Curve'])
+    # Mesh to Curve → Fillet → Resample → Cyclic
+    link(mesh_to_curve.outputs['Curve'], fillet.inputs['Curve'])
+    link(group_in.outputs['Corner Radius'], fillet.inputs['Radius'])
+    link(group_in.outputs['Corner Resolution'], fillet.inputs['Count'])
+    link(fillet.outputs['Curve'], resample.inputs['Curve'])
     link(group_in.outputs['Resolution'], resample.inputs['Count'])
     link(resample.outputs['Curve'], set_cyclic.inputs['Curve'])
     link(set_cyclic.outputs['Curve'], set_normal.inputs['Curve'])
