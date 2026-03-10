@@ -71,6 +71,16 @@ def _build_interface(ng):
     )
     s.default_value, s.min_value, s.max_value = 4, 1, 32
 
+    s = ng.interface.new_socket(
+        name="Merge Distance", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 0.01, 0.0, 10.0
+    s.subtype = 'DISTANCE'
+
+    ng.interface.new_socket(
+        name="Normal Mode", in_out='INPUT', socket_type='NodeSocketMenu',
+    )
+
     ng.interface.new_socket(
         name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
@@ -311,21 +321,42 @@ def get_or_create_path_node_group():
     path_gp.location = (path_x + 200, path_y)
     path_gp.inputs['Layers as Instances'].default_value = False
 
+    # Convert curves → edges → merge nearby points → back to curve
+    # This straightens segments and collapses GP noise into clean corners
+    curves_to_edges = ng.nodes.new('GeometryNodeCurveToMesh')
+    curves_to_edges.location = (path_x + 400, path_y)
+
+    merge = ng.nodes.new('GeometryNodeMergeByDistance')
+    merge.location = (path_x + 600, path_y)
+
+    edges_to_curve = ng.nodes.new('GeometryNodeMeshToCurve')
+    edges_to_curve.location = (path_x + 800, path_y)
+
     fillet = ng.nodes.new('GeometryNodeFilletCurve')
-    fillet.location = (path_x + 400, path_y)
+    fillet.location = (path_x + 1000, path_y)
     fillet.inputs['Mode'].default_value = 'Poly'
 
     path_resample = ng.nodes.new('GeometryNodeResampleCurve')
-    path_resample.location = (path_x + 600, path_y)
+    path_resample.location = (path_x + 1200, path_y)
+
+    # Set curve normal mode (user-switchable from modifier panel)
+    set_normal = ng.nodes.new('GeometryNodeSetCurveNormal')
+    set_normal.location = (path_x + 1400, path_y)
 
     link(group_in.outputs['Geometry'], path_gp.inputs['Grease Pencil'])
     link(path_sel.outputs['Selection'], path_gp.inputs['Selection'])
-    link(path_gp.outputs['Curves'], fillet.inputs['Curve'])
+    link(path_gp.outputs['Curves'], curves_to_edges.inputs['Curve'])
+    link(curves_to_edges.outputs['Mesh'], merge.inputs['Geometry'])
+    link(group_in.outputs['Merge Distance'], merge.inputs['Distance'])
+    link(merge.outputs['Geometry'], edges_to_curve.inputs['Mesh'])
+    link(edges_to_curve.outputs['Curve'], fillet.inputs['Curve'])
     link(group_in.outputs['Corner Radius'], fillet.inputs['Radius'])
     link(group_in.outputs['Corner Resolution'], fillet.inputs['Count'])
     link(fillet.outputs['Curve'], path_resample.inputs['Curve'])
     link(group_in.outputs['Path Resolution'], path_resample.inputs['Count'])
-    path_out = path_resample.outputs['Curve']
+    link(path_resample.outputs['Curve'], set_normal.inputs['Curve'])
+    link(group_in.outputs['Normal Mode'], set_normal.inputs['Mode'])
+    path_out = set_normal.outputs['Curve']
 
     # Sweep profile along path
     curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
@@ -408,6 +439,13 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
 
         mod = gp_obj.modifiers.new(name="PathMesh", type='NODES')
         mod.node_group = get_or_create_path_node_group()
+
+        # Set Normal Mode default to Minimum Twist
+        for item in mod.node_group.interface.items_tree:
+            if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
+                mod[item.identifier] = 0
+                mod[item.identifier + "_menu"] = 'Minimum Twist'
+                break
 
         context.view_layer.objects.active = gp_obj
         gp_obj.select_set(True)

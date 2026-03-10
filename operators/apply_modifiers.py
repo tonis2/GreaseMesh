@@ -53,7 +53,20 @@ def _apply_gp_modifiers(context, gp_obj):
     new_obj.matrix_world = matrix
 
     for mat in materials:
-        new_obj.data.materials.append(mat)
+        if mat and mat.node_tree is None:
+            # GP materials lack a shader node tree — replace with a mesh
+            # material so renderers and painting addons work correctly.
+            mesh_mat = bpy.data.materials.new(name=mat.name)
+            mesh_mat.use_nodes = True
+            # Copy the GP surface colour to the Principled BSDF base colour
+            principled = mesh_mat.node_tree.nodes.get("Principled BSDF")
+            if principled and hasattr(mat, "grease_pencil"):
+                gp_mat = mat.grease_pencil
+                col = gp_mat.color
+                principled.inputs["Base Color"].default_value = (col[0], col[1], col[2], col[3])
+            new_obj.data.materials.append(mesh_mat)
+        else:
+            new_obj.data.materials.append(mat)
 
     # Select the new object
     context.view_layer.objects.active = new_obj
