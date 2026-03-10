@@ -8,6 +8,13 @@ class GPTOOLS_OT_add_gpencil(bpy.types.Operator):
     bl_label = "Add New Grease Pencil"
     bl_options = {"REGISTER", "UNDO"}
 
+    @classmethod
+    def poll(cls, context):
+        if context.mode != 'OBJECT':
+            cls.poll_message_set("Switch to Object mode first")
+            return False
+        return True
+
     def execute(self, context):
         bpy.ops.object.grease_pencil_add(type='EMPTY')
         bpy.ops.object.mode_set(mode='PAINT_GREASE_PENCIL')

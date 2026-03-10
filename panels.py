@@ -40,13 +40,18 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         grid = box.grid_flow(row_major=True, columns=2, align=False)
         grid.operator("gptools.bool_cut", text="Bool Cut", icon="MOD_BOOLEAN")
         grid.operator("gptools.array_on_curve", text="Array on Pencil", icon="MOD_ARRAY")
+        grid.operator("gptools.knife_cut", text="Knife", icon="MOD_EDGESPLIT")
+
+        # Experimental Section
+        box = layout.box()
+        box.label(text="Experimental", icon="EXPERIMENTAL")
+        grid = box.grid_flow(row_major=True, columns=2, align=False)
         grid.operator(
             "gptools.stamp_scatter",
             text="Scatter",
             icon="OUTLINER_OB_POINTCLOUD",
         )
         grid.operator("gptools.lattice_wrap", text="Lattice Wrap", icon="MOD_LATTICE")
-
 
 
 classes = [

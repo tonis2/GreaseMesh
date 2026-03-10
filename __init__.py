@@ -26,6 +26,7 @@ from .operators import (
     array_on_curve,
     apply_modifiers,
     stamp_scatter,
+    knife_cut,
 )
 
 if _needs_reload:
@@ -42,6 +43,7 @@ if _needs_reload:
     array_on_curve = importlib.reload(array_on_curve)
     apply_modifiers = importlib.reload(apply_modifiers)
     stamp_scatter = importlib.reload(stamp_scatter)
+    knife_cut = importlib.reload(knife_cut)
 
 registration_modules = [
     panels,
@@ -56,6 +58,7 @@ registration_modules = [
     array_on_curve,
     apply_modifiers,
     stamp_scatter,
+    knife_cut,
 ]
 
 
