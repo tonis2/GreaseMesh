@@ -81,6 +81,26 @@ def _build_interface(ng):
         name="Normal Mode", in_out='INPUT', socket_type='NodeSocketMenu',
     )
 
+    s = ng.interface.new_socket(
+        name="Noise Strength", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 0.0, 0.0, 1.0
+
+    s = ng.interface.new_socket(
+        name="Noise Scale", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 3.0, 0.1, 50.0
+
+    s = ng.interface.new_socket(
+        name="Noise Detail", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 4.0, 0.0, 15.0
+
+    s = ng.interface.new_socket(
+        name="Noise Seed", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    s.default_value, s.min_value, s.max_value = 0, 0, 10000
+
     ng.interface.new_socket(
         name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
     )
@@ -367,14 +387,64 @@ def get_or_create_path_node_group():
     shade_flat.location = (2000, 0)
     shade_flat.inputs['Shade Smooth'].default_value = False
 
+    # Noise displacement nodes
+    noise_pos = ng.nodes.new('GeometryNodeInputPosition')
+    noise_pos.location = (2200, -200)
+
+    seed_mul = ng.nodes.new('ShaderNodeMath')
+    seed_mul.location = (2200, -400)
+    seed_mul.operation = 'MULTIPLY'
+    seed_mul.inputs[1].default_value = 137.3
+
+    seed_combine = ng.nodes.new('ShaderNodeCombineXYZ')
+    seed_combine.location = (2400, -400)
+
+    seed_add = ng.nodes.new('ShaderNodeVectorMath')
+    seed_add.location = (2400, -200)
+    seed_add.operation = 'ADD'
+
+    noise_tex = ng.nodes.new('ShaderNodeTexNoise')
+    noise_tex.location = (2600, -200)
+    noise_tex.noise_dimensions = '3D'
+
+    noise_center = ng.nodes.new('ShaderNodeVectorMath')
+    noise_center.location = (2800, -200)
+    noise_center.operation = 'SUBTRACT'
+    noise_center.inputs[1].default_value = (0.5, 0.5, 0.5)
+
+    noise_scale = ng.nodes.new('ShaderNodeVectorMath')
+    noise_scale.location = (3000, -200)
+    noise_scale.operation = 'SCALE'
+
+    noise_set_pos = ng.nodes.new('GeometryNodeSetPosition')
+    noise_set_pos.location = (3200, 0)
+
     group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (2200, 0)
+    group_out.location = (3400, 0)
 
     link(path_out, curve_to_mesh.inputs['Curve'])
     link(flattened_profile, curve_to_mesh.inputs['Profile Curve'])
     link(group_in.outputs['Fill Caps'], curve_to_mesh.inputs['Fill Caps'])
     link(curve_to_mesh.outputs['Mesh'], shade_flat.inputs['Mesh'])
-    link(shade_flat.outputs['Mesh'], group_out.inputs['Geometry'])
+
+    # Noise pipeline links
+    link(group_in.outputs['Noise Seed'], seed_mul.inputs[0])
+    link(seed_mul.outputs['Value'], seed_combine.inputs['X'])
+    link(seed_mul.outputs['Value'], seed_combine.inputs['Y'])
+    link(seed_mul.outputs['Value'], seed_combine.inputs['Z'])
+    link(noise_pos.outputs['Position'], seed_add.inputs[0])
+    link(seed_combine.outputs['Vector'], seed_add.inputs[1])
+    link(seed_add.outputs['Vector'], noise_tex.inputs['Vector'])
+    link(group_in.outputs['Noise Scale'], noise_tex.inputs['Scale'])
+    link(group_in.outputs['Noise Detail'], noise_tex.inputs['Detail'])
+    link(noise_tex.outputs['Color'], noise_center.inputs[0])
+    link(noise_center.outputs['Vector'], noise_scale.inputs[0])
+    link(group_in.outputs['Noise Strength'], noise_scale.inputs['Scale'])
+
+    # shade_flat → noise_set_pos → group_out
+    link(shade_flat.outputs['Mesh'], noise_set_pos.inputs['Geometry'])
+    link(noise_scale.outputs['Vector'], noise_set_pos.inputs['Offset'])
+    link(noise_set_pos.outputs['Geometry'], group_out.inputs['Geometry'])
 
     return ng
 

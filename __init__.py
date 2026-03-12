@@ -1,14 +1,3 @@
-bl_info = {
-    "name": "Grease Mesh",
-    "author": "Tonis",
-    "version": (1, 0, 0),
-    "blender": (3, 6, 0),
-    "location": "View3D > N-Panel > GPTools",
-    "description": "Easy toolbox for creating meshes from Grease Pencil",
-    "category": "Mesh",
-    "support": "COMMUNITY",
-}
-
 _needs_reload = "bpy" in locals()
 
 import bpy
