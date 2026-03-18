@@ -1,3 +1,12 @@
+bl_info = {
+    "name": "Grease Mesh",
+    "description": "Easy toolbox for creating meshes from Grease Pencil",
+    "author": "Tonis",
+    "version": (1, 0, 3),
+    "blender": (4, 2, 0),
+    "category": "Mesh",
+}
+
 _needs_reload = "bpy" in locals()
 
 import bpy
