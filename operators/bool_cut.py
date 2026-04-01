@@ -7,133 +7,139 @@ BOOL_CUTTER_NODE_GROUP = "GreaseMesh_BoolCutter"
 def get_or_create_bool_cutter_node_group():
     """Build a node group like Solid, but centered so it straddles the surface.
 
-    Same ngon-remap pipeline as Solid, but before extruding the flat face
-    is offset by -Normal * Thickness/2 so the cutter penetrates inward.
+    Same edge-merge pipeline as Solid, then offsets by -Normal * Thickness/2
+    so the cutter penetrates inward.
     """
     ng = bpy.data.node_groups.get(BOOL_CUTTER_NODE_GROUP)
     if ng is not None:
-        return ng
+        ng.nodes.clear()
+    else:
+        ng = bpy.data.node_groups.new(name=BOOL_CUTTER_NODE_GROUP, type='GeometryNodeTree')
 
-    ng = bpy.data.node_groups.new(name=BOOL_CUTTER_NODE_GROUP, type='GeometryNodeTree')
+        ng.interface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
 
-    # Interface sockets
-    ng.interface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+        res_sock = ng.interface.new_socket(
+            name="Resolution", in_out='INPUT', socket_type='NodeSocketInt',
+        )
+        res_sock.default_value = 64
+        res_sock.min_value = 8
+        res_sock.max_value = 512
 
-    res_sock = ng.interface.new_socket(
-        name="Resolution", in_out='INPUT', socket_type='NodeSocketInt',
-    )
-    res_sock.default_value = 64
-    res_sock.min_value = 8
-    res_sock.max_value = 512
+        thick_sock = ng.interface.new_socket(
+            name="Thickness", in_out='INPUT', socket_type='NodeSocketFloat',
+        )
+        thick_sock.default_value = 2.0
+        thick_sock.min_value = 0.01
+        thick_sock.max_value = 100.0
 
-    thick_sock = ng.interface.new_socket(
-        name="Thickness", in_out='INPUT', socket_type='NodeSocketFloat',
-    )
-    thick_sock.default_value = 2.0
-    thick_sock.min_value = 0.01
-    thick_sock.max_value = 100.0
-
-    ng.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        ng.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
 
     # --- Nodes ---
-    x = -1200
+    x = -1600
     group_in = ng.nodes.new('NodeGroupInput')
     group_in.location = (x, 0)
 
-    # GP to Curves
     x += 200
     gp_to_curves = ng.nodes.new('GeometryNodeGreasePencilToCurves')
     gp_to_curves.location = (x, 0)
     gp_to_curves.inputs['Layers as Instances'].default_value = False
 
-    # Resample to uniform point count
     x += 200
-    resample = ng.nodes.new('GeometryNodeResampleCurve')
-    resample.location = (x, 0)
+    curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
+    curve_to_mesh.location = (x, 0)
 
-    # Close the curve
+    # --- Adaptive merge distances ---
+    bbox = ng.nodes.new('GeometryNodeBoundBox')
+    bbox.location = (x + 200, -300)
+
+    bbox_sub = ng.nodes.new('ShaderNodeVectorMath')
+    bbox_sub.location = (x + 400, -300)
+    bbox_sub.operation = 'SUBTRACT'
+
+    bbox_len = ng.nodes.new('ShaderNodeVectorMath')
+    bbox_len.location = (x + 600, -300)
+    bbox_len.operation = 'LENGTH'
+
+    bbox_scale_small = ng.nodes.new('ShaderNodeMath')
+    bbox_scale_small.location = (x + 800, -250)
+    bbox_scale_small.operation = 'MULTIPLY'
+    bbox_scale_small.inputs[1].default_value = 0.025
+
+    bbox_scale_large = ng.nodes.new('ShaderNodeMath')
+    bbox_scale_large.location = (x + 800, -350)
+    bbox_scale_large.operation = 'MULTIPLY'
+    bbox_scale_large.inputs[1].default_value = 0.25
+
+    x += 200
+    merge_dupes = ng.nodes.new('GeometryNodeMergeByDistance')
+    merge_dupes.location = (x, 0)
+
+    x += 200
+    vert_neighbors = ng.nodes.new('GeometryNodeInputMeshVertexNeighbors')
+    vert_neighbors.location = (x, -150)
+
+    is_endpoint = ng.nodes.new('FunctionNodeCompare')
+    is_endpoint.location = (x + 200, -150)
+    is_endpoint.data_type = 'INT'
+    is_endpoint.operation = 'EQUAL'
+    is_endpoint.inputs[3].default_value = 1
+
+    merge_join = ng.nodes.new('GeometryNodeMergeByDistance')
+    merge_join.location = (x, 0)
+
+    x += 200
+    mesh_to_curve = ng.nodes.new('GeometryNodeMeshToCurve')
+    mesh_to_curve.location = (x, 0)
+
     x += 200
     set_cyclic = ng.nodes.new('GeometryNodeSetSplineCyclic')
     set_cyclic.location = (x, 0)
     set_cyclic.inputs['Cyclic'].default_value = True
 
-    # Convert curve to edge loop (no profile = edges only)
     x += 200
-    curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
-    curve_to_mesh.location = (x, 0)
-
-    # Count vertices in the edge loop
-    x += 200
-    domain_size = ng.nodes.new('GeometryNodeAttributeDomainSize')
-    domain_size.location = (x, -200)
-
-    # Sample positions from edge loop by index
-    position = ng.nodes.new('GeometryNodeInputPosition')
-    position.location = (x, -400)
-
-    index = ng.nodes.new('GeometryNodeInputIndex')
-    index.location = (x + 100, -300)
+    resample = ng.nodes.new('GeometryNodeResampleCurve')
+    resample.location = (x, 0)
 
     x += 200
-    sample_idx = ng.nodes.new('GeometryNodeSampleIndex')
-    sample_idx.location = (x, -300)
-    sample_idx.data_type = 'FLOAT_VECTOR'
+    fill_curve = ng.nodes.new('GeometryNodeFillCurve')
+    fill_curve.location = (x, 0)
 
-    # Create filled disc with same vertex count
-    circle = ng.nodes.new('GeometryNodeMeshCircle')
-    circle.location = (x, 0)
-    circle.fill_type = 'NGON'
-
-    # Map disc vertex positions to curve positions
-    x += 200
-    set_pos = ng.nodes.new('GeometryNodeSetPosition')
-    set_pos.location = (x, 0)
-
-    # Clean up coincident verts
     x += 200
     merge = ng.nodes.new('GeometryNodeMergeByDistance')
     merge.location = (x, 0)
     merge.inputs['Distance'].default_value = 0.001
 
     # --- Center the flat face so extrusion straddles the surface ---
-    # Offset by -Normal * Thickness/2 before extruding
     x += 200
     normal_node = ng.nodes.new('GeometryNodeInputNormal')
     normal_node.location = (x, -200)
 
-    # Compute -Thickness / 2
     negate_half = ng.nodes.new('ShaderNodeMath')
     negate_half.location = (x, -350)
     negate_half.operation = 'MULTIPLY'
     negate_half.inputs[1].default_value = -0.5
 
-    # Scale normal by -Thickness/2
     x += 200
     scale_normal = ng.nodes.new('ShaderNodeVectorMath')
     scale_normal.location = (x, -200)
     scale_normal.operation = 'SCALE'
 
-    # Apply offset to flat face
     x += 200
     offset_pos = ng.nodes.new('GeometryNodeSetPosition')
     offset_pos.location = (x, 0)
 
-    # Extrude for thickness
     x += 200
     extrude = ng.nodes.new('GeometryNodeExtrudeMesh')
     extrude.location = (x, 0)
-    extrude.inputs['Individual'].default_value = True
+    extrude.inputs['Individual'].default_value = False
 
-    # Bottom cap: flip a copy of the offset face
     flip = ng.nodes.new('GeometryNodeFlipFaces')
     flip.location = (x - 200, -200)
 
-    # Join extruded shape + flipped bottom cap
     x += 200
     join = ng.nodes.new('GeometryNodeJoinGeometry')
     join.location = (x, 0)
 
-    # Merge coincident verts to weld bottom cap to extrude sides
     merge_final = ng.nodes.new('GeometryNodeMergeByDistance')
     merge_final.location = (x + 200, 0)
     merge_final.inputs['Distance'].default_value = 0.001
@@ -145,46 +151,47 @@ def get_or_create_bool_cutter_node_group():
     # --- Links ---
     link = ng.links.new
 
-    # GP → Curves → Resample → Cyclic → Edge loop
     link(group_in.outputs['Geometry'], gp_to_curves.inputs['Grease Pencil'])
-    link(gp_to_curves.outputs['Curves'], resample.inputs['Curve'])
+    link(gp_to_curves.outputs['Curves'], curve_to_mesh.inputs['Curve'])
+
+    # Adaptive merge distances
+    link(curve_to_mesh.outputs['Mesh'], bbox.inputs['Geometry'])
+    link(bbox.outputs['Max'], bbox_sub.inputs[0])
+    link(bbox.outputs['Min'], bbox_sub.inputs[1])
+    link(bbox_sub.outputs['Vector'], bbox_len.inputs[0])
+    link(bbox_len.outputs['Value'], bbox_scale_small.inputs[0])
+    link(bbox_len.outputs['Value'], bbox_scale_large.inputs[0])
+
+    # Pass 1: collapse duplicates
+    link(curve_to_mesh.outputs['Mesh'], merge_dupes.inputs['Geometry'])
+    link(bbox_scale_small.outputs['Value'], merge_dupes.inputs['Distance'])
+
+    # Pass 2: bridge gaps (endpoints only)
+    link(merge_dupes.outputs['Geometry'], merge_join.inputs['Geometry'])
+    link(bbox_scale_large.outputs['Value'], merge_join.inputs['Distance'])
+    link(vert_neighbors.outputs['Vertex Count'], is_endpoint.inputs[2])
+    link(is_endpoint.outputs['Result'], merge_join.inputs['Selection'])
+
+    link(merge_join.outputs['Geometry'], mesh_to_curve.inputs['Mesh'])
+    link(mesh_to_curve.outputs['Curve'], set_cyclic.inputs['Curve'])
+    link(set_cyclic.outputs['Curve'], resample.inputs['Curve'])
     link(group_in.outputs['Resolution'], resample.inputs['Count'])
-    link(resample.outputs['Curve'], set_cyclic.inputs['Curve'])
-    link(set_cyclic.outputs['Curve'], curve_to_mesh.inputs['Curve'])
+    link(resample.outputs['Curve'], fill_curve.inputs['Curve'])
 
-    # Count verts → Mesh Circle with same count
-    link(curve_to_mesh.outputs['Mesh'], domain_size.inputs['Geometry'])
-    link(domain_size.outputs['Point Count'], circle.inputs['Vertices'])
+    link(fill_curve.outputs['Mesh'], merge.inputs['Geometry'])
 
-    # Sample positions from edge loop
-    link(curve_to_mesh.outputs['Mesh'], sample_idx.inputs['Geometry'])
-    link(position.outputs['Position'], sample_idx.inputs['Value'])
-    link(index.outputs['Index'], sample_idx.inputs['Index'])
-
-    # Remap circle verts to curve positions
-    link(circle.outputs['Mesh'], set_pos.inputs['Geometry'])
-    link(sample_idx.outputs['Value'], set_pos.inputs['Position'])
-
-    # Merge → Offset by -Normal*Thickness/2 → Extrude
-    link(set_pos.outputs['Geometry'], merge.inputs['Geometry'])
-
-    # Compute offset vector: Normal * (-Thickness / 2)
+    # Offset: Normal * (-Thickness / 2)
     link(group_in.outputs['Thickness'], negate_half.inputs[0])
     link(normal_node.outputs['Normal'], scale_normal.inputs[0])
     link(negate_half.outputs['Value'], scale_normal.inputs['Scale'])
 
-    # Apply offset to center the flat face
     link(merge.outputs['Geometry'], offset_pos.inputs['Geometry'])
     link(scale_normal.outputs['Vector'], offset_pos.inputs['Offset'])
 
-    # Bottom cap from offset face (before extrude)
     link(offset_pos.outputs['Geometry'], flip.inputs['Mesh'])
-
-    # Extrude
     link(offset_pos.outputs['Geometry'], extrude.inputs['Mesh'])
     link(group_in.outputs['Thickness'], extrude.inputs['Offset Scale'])
 
-    # Join extruded + bottom cap → Merge → Output
     link(extrude.outputs['Mesh'], join.inputs['Geometry'])
     link(flip.outputs['Mesh'], join.inputs['Geometry'])
     link(join.outputs['Geometry'], merge_final.inputs['Geometry'])
