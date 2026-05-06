@@ -17,6 +17,7 @@ from .operators import (
     gn_solid_mesh,
     gn_mirror_mesh,
     gn_path_mesh,
+    gn_blocks_mesh,
     gn_wall_mesh,
     screw_mesh,
     lattice_wrap,
@@ -34,6 +35,7 @@ if _needs_reload:
     gn_solid_mesh = importlib.reload(gn_solid_mesh)
     gn_mirror_mesh = importlib.reload(gn_mirror_mesh)
     gn_path_mesh = importlib.reload(gn_path_mesh)
+    gn_blocks_mesh = importlib.reload(gn_blocks_mesh)
     gn_wall_mesh = importlib.reload(gn_wall_mesh)
     screw_mesh = importlib.reload(screw_mesh)
     lattice_wrap = importlib.reload(lattice_wrap)
@@ -49,6 +51,7 @@ registration_modules = [
     gn_solid_mesh,
     gn_mirror_mesh,
     gn_path_mesh,
+    gn_blocks_mesh,
     gn_wall_mesh,
     screw_mesh,
     lattice_wrap,

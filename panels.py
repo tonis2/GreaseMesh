@@ -26,6 +26,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         grid.operator("gptools.gn_solid_mesh", text="Solid", icon="MOD_SOLIDIFY")
         grid.operator("gptools.gn_mirror_mesh", text="Mirror", icon="MOD_MIRROR")
         grid.operator("gptools.gn_path_mesh", text="Path", icon="MOD_CURVE")
+        grid.operator("gptools.gn_blocks_mesh", text="Blocks", icon="MOD_ARRAY")
         grid.operator("gptools.gn_wall_mesh", text="Wall", icon="MOD_BUILD")
 
         # Screw Mesh Section
