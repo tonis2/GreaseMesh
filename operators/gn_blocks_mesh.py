@@ -12,7 +12,6 @@ from .gn_solid_mesh import (
 
 NODE_GROUP_NAME = "GreaseMesh_Blocks"
 MODIFIER_NAME = "BlocksMesh"
-PATH_LAYER_NAME = "Path"
 PAINT_LAYER_NAME = "Paint"
 
 
@@ -20,42 +19,32 @@ def _layer_has_strokes(layer):
     return any(len(f.drawing.strokes) > 0 for f in layer.frames)
 
 
-def _gather_layer_points_local(gp_obj, layer_name):
-    layer = gp_obj.data.layers.get(layer_name)
-    if layer is None:
-        return []
+def _gather_path_points_local(gp_obj):
+    """Path strokes are anything NOT on the Paint layer — typically the GP's
+    default 'Layer'. Collected for the PCA basis fit."""
     pts = []
-    for frame in layer.frames:
-        for s in frame.drawing.strokes:
-            for p in s.points:
-                pts.append(p.position.copy())
+    for layer in gp_obj.data.layers:
+        if layer.name == PAINT_LAYER_NAME:
+            continue
+        for frame in layer.frames:
+            for s in frame.drawing.strokes:
+                for p in s.points:
+                    pts.append(p.position.copy())
     return pts
 
 
 def ensure_gp_layers(gp_obj):
-    """Ensure 'Path' and 'Paint' layers exist with drawable frames.
-
-    If neither exists yet but a layer with strokes does, rename the first such
-    layer to 'Path' so the user's first drawing seeds the basis.
-    """
+    """Ensure a 'Paint' layer exists with a drawable frame. The default GP
+    layer (typically 'Layer') is used for path strokes — we never rename it,
+    so the user keeps their familiar default layer for drawing the spine."""
     gp_data = gp_obj.data
     scene_frame = bpy.context.scene.frame_current
 
-    has_path = gp_data.layers.get(PATH_LAYER_NAME)
-    has_paint = gp_data.layers.get(PAINT_LAYER_NAME)
-
-    if not has_path and not has_paint:
-        for layer in gp_data.layers:
-            if _layer_has_strokes(layer):
-                layer.name = PATH_LAYER_NAME
-                break
-
-    for name in (PATH_LAYER_NAME, PAINT_LAYER_NAME):
-        layer = gp_data.layers.get(name)
-        if layer is None:
-            layer = gp_data.layers.new(name)
-        if len(layer.frames) == 0:
-            layer.frames.new(scene_frame)
+    paint = gp_data.layers.get(PAINT_LAYER_NAME)
+    if paint is None:
+        paint = gp_data.layers.new(PAINT_LAYER_NAME)
+    if len(paint.frames) == 0:
+        paint.frames.new(scene_frame)
 
 
 def _show_properties_tab(context, tab):
@@ -122,6 +111,21 @@ def get_or_create_blocks_node_group():
 
     nseed = iface.new_socket(name="Noise Seed", in_out='INPUT', socket_type='NodeSocketInt')
     nseed.default_value, nseed.min_value, nseed.max_value = 0, 0, 10000
+
+    tj = iface.new_socket(name="Thickness Jitter", in_out='INPUT', socket_type='NodeSocketFloat')
+    tj.default_value, tj.min_value, tj.max_value = 0.0, 0.0, 1.0
+    tj.subtype = 'FACTOR'
+
+    sj = iface.new_socket(name="Scale Jitter", in_out='INPUT', socket_type='NodeSocketFloat')
+    sj.default_value, sj.min_value, sj.max_value = 0.0, 0.0, 1.0
+    sj.subtype = 'FACTOR'
+
+    rj = iface.new_socket(name="Rotation Jitter", in_out='INPUT', socket_type='NodeSocketFloat')
+    rj.default_value, rj.min_value, rj.max_value = 0.0, 0.0, 1.5707963
+    rj.subtype = 'ANGLE'
+
+    jseed = iface.new_socket(name="Jitter Seed", in_out='INPUT', socket_type='NodeSocketInt')
+    jseed.default_value, jseed.min_value, jseed.max_value = 0, 0, 10000
 
     for hidden_name, default in (
         ("Center", (0.0, 0.0, 0.0)),
@@ -199,9 +203,113 @@ def get_or_create_blocks_node_group():
     fill = nodes.new('GeometryNodeFillCurve'); fill.location = (600, 0)
     link(resample.outputs['Curve'], fill.inputs['Curve'])
 
-    # Reverse basis change on filled mesh: world = Center + p.x·U + p.y·V (Z=0 from Fill)
-    pos2 = nodes.new('GeometryNodeInputPosition'); pos2.location = (700, 300)
-    sep_pos = nodes.new('ShaderNodeSeparateXYZ'); sep_pos.location = (900, 300)
+    # ── Per-block jitter ────────────────────────────────────────────────────
+    # Each Paint stroke fills as a disjoint mesh island. Mesh Island Index is
+    # a stable per-block ID across all evaluation domains (vertex/face/edge),
+    # which is what we need to drive Random Value consistently and to compute
+    # a per-block centroid via AccumulateField grouped by island.
+    #
+    # CaptureAttribute(domain=FACE) was tried first but in this Blender build
+    # its value field is evaluated per-vertex regardless of the domain knob,
+    # so per-face Index/Position came back as per-vertex values.
+    captured_geom = fill.outputs['Mesh']
+
+    isl = nodes.new('GeometryNodeInputMeshIsland'); isl.location = (700, -360)
+    block_id_field = isl.outputs['Island Index']
+
+    # Per-island centroid via AccumulateField: total Position summed per island,
+    # divided by per-island vertex count (also via AccumulateField summing 1).
+    pos_for_cen = nodes.new('GeometryNodeInputPosition'); pos_for_cen.location = (700, -200)
+    acc_pos = nodes.new('GeometryNodeAccumulateField'); acc_pos.location = (900, -200)
+    acc_pos.data_type = 'FLOAT_VECTOR'
+    acc_pos.domain = 'POINT'
+    link(pos_for_cen.outputs['Position'], acc_pos.inputs['Value'])
+    link(isl.outputs['Island Index'], acc_pos.inputs['Group ID'])
+
+    one_const = nodes.new('ShaderNodeValue'); one_const.location = (700, -100)
+    one_const.outputs['Value'].default_value = 1.0
+    acc_count = nodes.new('GeometryNodeAccumulateField'); acc_count.location = (900, -100)
+    acc_count.data_type = 'FLOAT'
+    acc_count.domain = 'POINT'
+    link(one_const.outputs['Value'], acc_count.inputs['Value'])
+    link(isl.outputs['Island Index'], acc_count.inputs['Group ID'])
+
+    inv_count = nodes.new('ShaderNodeMath'); inv_count.location = (1100, -100)
+    inv_count.operation = 'DIVIDE'
+    inv_count.inputs[0].default_value = 1.0
+    link(acc_count.outputs['Total'], inv_count.inputs[1])
+
+    centroid_scale = nodes.new('ShaderNodeVectorMath'); centroid_scale.location = (1300, -150)
+    centroid_scale.operation = 'SCALE'
+    link(acc_pos.outputs['Total'], centroid_scale.inputs[0])
+    link(inv_count.outputs['Value'], centroid_scale.inputs['Scale'])
+    centroid_field = centroid_scale.outputs['Vector']
+
+    def _seeded_rand(label, seed_offset, x_off):
+        # Three independent per-block randoms by adding offsets to Jitter Seed
+        seed_node = nodes.new('ShaderNodeMath'); seed_node.location = (1100 + x_off, 800)
+        seed_node.operation = 'ADD'
+        seed_node.inputs[1].default_value = float(seed_offset)
+        link(group_in.outputs['Jitter Seed'], seed_node.inputs[0])
+
+        r = nodes.new('FunctionNodeRandomValue'); r.location = (1300 + x_off, 800)
+        r.data_type = 'FLOAT'
+        r.inputs['Min'].default_value = -1.0
+        r.inputs['Max'].default_value = 1.0
+        link(block_id_field, r.inputs['ID'])
+        link(seed_node.outputs['Value'], r.inputs['Seed'])
+        r.label = label
+        return r.outputs['Value']
+
+    rand_thick = _seeded_rand('thick', 0,    0)
+    rand_scale = _seeded_rand('scale', 31, 250)
+    rand_rot   = _seeded_rand('rot',   67, 500)
+
+    # rot_angle  = rand_rot * Rotation Jitter   (radians)
+    rot_mul = nodes.new('ShaderNodeMath'); rot_mul.location = (1900, 800); rot_mul.operation = 'MULTIPLY'
+    link(rand_rot, rot_mul.inputs[0])
+    link(group_in.outputs['Rotation Jitter'], rot_mul.inputs[1])
+
+    # scale_factor = 1 + rand_scale * Scale Jitter
+    sj_mul = nodes.new('ShaderNodeMath'); sj_mul.location = (1500, 1000); sj_mul.operation = 'MULTIPLY'
+    link(rand_scale, sj_mul.inputs[0])
+    link(group_in.outputs['Scale Jitter'], sj_mul.inputs[1])
+    sj_add = nodes.new('ShaderNodeMath'); sj_add.location = (1700, 1000); sj_add.operation = 'ADD'
+    sj_add.inputs[1].default_value = 1.0
+    link(sj_mul.outputs['Value'], sj_add.inputs[0])
+
+    # thick_factor = 1 + rand_thick * Thickness Jitter
+    tj_mul = nodes.new('ShaderNodeMath'); tj_mul.location = (1500, 1200); tj_mul.operation = 'MULTIPLY'
+    link(rand_thick, tj_mul.inputs[0])
+    link(group_in.outputs['Thickness Jitter'], tj_mul.inputs[1])
+    tj_add = nodes.new('ShaderNodeMath'); tj_add.location = (1700, 1200); tj_add.operation = 'ADD'
+    tj_add.inputs[1].default_value = 1.0
+    link(tj_mul.outputs['Value'], tj_add.inputs[0])
+
+    # Per-vertex transform in basis frame: rotate around face centroid (Z-axis,
+    # which is the basis Normal), then scale around the same point.
+    pos_for_jitter = nodes.new('GeometryNodeInputPosition'); pos_for_jitter.location = (1900, 600)
+    vrot = nodes.new('ShaderNodeVectorRotate'); vrot.location = (2100, 600)
+    vrot.rotation_type = 'Z_AXIS'
+    link(pos_for_jitter.outputs['Position'], vrot.inputs['Vector'])
+    link(centroid_field, vrot.inputs['Center'])
+    link(rot_mul.outputs['Value'], vrot.inputs['Angle'])
+
+    rel_after_rot = nodes.new('ShaderNodeVectorMath'); rel_after_rot.location = (2300, 600)
+    rel_after_rot.operation = 'SUBTRACT'
+    link(vrot.outputs['Vector'], rel_after_rot.inputs[0])
+    link(centroid_field, rel_after_rot.inputs[1])
+
+    scaled_rel = _add_scale(ng, rel_after_rot.outputs['Vector'], sj_add.outputs['Value'])
+    jittered_pos = _add_vec_op(ng, 'ADD', scaled_rel, centroid_field)
+
+    set_pos_jitter = nodes.new('GeometryNodeSetPosition'); set_pos_jitter.location = (2700, 0)
+    link(captured_geom, set_pos_jitter.inputs['Geometry'])
+    link(jittered_pos, set_pos_jitter.inputs['Position'])
+
+    # Reverse basis change on (jittered) filled mesh: world = Center + p.x·U + p.y·V
+    pos2 = nodes.new('GeometryNodeInputPosition'); pos2.location = (2800, 300)
+    sep_pos = nodes.new('ShaderNodeSeparateXYZ'); sep_pos.location = (3000, 300)
     link(pos2.outputs['Position'], sep_pos.inputs[0])
 
     u_scaled = _add_scale(ng, group_in.outputs['U'], sep_pos.outputs['X'])
@@ -209,19 +317,26 @@ def get_or_create_blocks_node_group():
     uv_sum = _add_vec_op(ng, 'ADD', u_scaled, v_scaled)
     world_back = _add_vec_op(ng, 'ADD', uv_sum, group_in.outputs['Center'])
 
-    set_pos_back = nodes.new('GeometryNodeSetPosition'); set_pos_back.location = (1800, 0)
-    link(fill.outputs['Mesh'], set_pos_back.inputs['Geometry'])
+    set_pos_back = nodes.new('GeometryNodeSetPosition'); set_pos_back.location = (3500, 0)
+    link(set_pos_jitter.outputs['Geometry'], set_pos_back.inputs['Geometry'])
     link(world_back, set_pos_back.inputs['Position'])
 
-    merge_pre_extrude = nodes.new('GeometryNodeMergeByDistance'); merge_pre_extrude.location = (2000, 0)
+    merge_pre_extrude = nodes.new('GeometryNodeMergeByDistance'); merge_pre_extrude.location = (3700, 0)
     merge_pre_extrude.inputs['Distance'].default_value = 0.001
     link(set_pos_back.outputs['Geometry'], merge_pre_extrude.inputs['Geometry'])
 
-    extrude = nodes.new('GeometryNodeExtrudeMesh'); extrude.location = (2200, 0)
+    # Per-face thickness for Extrude — same thick_factor field re-evaluated on
+    # FACE domain (named-attribute lookup on FACE returns one value per face).
+    extrude_scale_field = nodes.new('ShaderNodeMath'); extrude_scale_field.location = (3700, -200)
+    extrude_scale_field.operation = 'MULTIPLY'
+    link(group_in.outputs['Thickness'], extrude_scale_field.inputs[0])
+    link(tj_add.outputs['Value'], extrude_scale_field.inputs[1])
+
+    extrude = nodes.new('GeometryNodeExtrudeMesh'); extrude.location = (3900, 0)
     extrude.inputs['Individual'].default_value = False
     link(merge_pre_extrude.outputs['Geometry'], extrude.inputs['Mesh'])
     link(group_in.outputs['Normal'], extrude.inputs['Offset'])
-    link(group_in.outputs['Thickness'], extrude.inputs['Offset Scale'])
+    link(extrude_scale_field.outputs['Value'], extrude.inputs['Offset Scale'])
 
     flip = nodes.new('GeometryNodeFlipFaces'); flip.location = (2200, -200)
     link(merge_pre_extrude.outputs['Geometry'], flip.inputs['Mesh'])
@@ -282,7 +397,7 @@ def get_or_create_blocks_node_group():
 class GPTOOLS_OT_gn_blocks_mesh(bpy.types.Operator):
     """Add a Geometry Nodes modifier on the Grease Pencil that turns each
     closed stroke on the 'Paint' layer into its own extruded solid, oriented
-    on the plane fitted through the 'Path' layer's strokes."""
+    on the plane fitted through strokes on the default (non-Paint) layer."""
 
     bl_idname = "gptools.gn_blocks_mesh"
     bl_label = "Blocks Mesh"
@@ -300,15 +415,17 @@ class GPTOOLS_OT_gn_blocks_mesh(bpy.types.Operator):
 
         ensure_gp_layers(gp_obj)
 
-        path_pts = _gather_layer_points_local(gp_obj, PATH_LAYER_NAME)
+        path_pts = _gather_path_points_local(gp_obj)
         if len(path_pts) < 3:
-            path_layer = gp_obj.data.layers.get(PATH_LAYER_NAME)
-            if path_layer is not None:
-                gp_obj.data.layers.active = path_layer
+            # Activate the first non-Paint layer so the user can draw on it
+            for layer in gp_obj.data.layers:
+                if layer.name != PAINT_LAYER_NAME:
+                    gp_obj.data.layers.active = layer
+                    break
             _show_properties_tab(context, 'DATA')
             self.report(
                 {"WARNING"},
-                "Draw on the 'Path' layer first, then click Blocks again.",
+                "Draw a line on any non-'Paint' layer first, then click Blocks again.",
             )
             return {"CANCELLED"}
 
