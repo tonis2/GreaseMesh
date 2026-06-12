@@ -5,6 +5,7 @@ from ..utils.conversion import (
     remove_cleanup_duplicate,
     walk_strokes_into_loop,
 )
+from ..utils.modifier_io import set_input
 
 BOOL_CUTTER_NODE_GROUP = "GreaseMesh_BoolCutter"
 
@@ -87,7 +88,7 @@ def get_or_create_bool_cutter_node_group():
     is_endpoint.location = (x + 200, -150)
     is_endpoint.data_type = 'INT'
     is_endpoint.operation = 'EQUAL'
-    is_endpoint.inputs[3].default_value = 1
+    is_endpoint.inputs['B'].default_value = 1
 
     merge_join = ng.nodes.new('GeometryNodeMergeByDistance')
     merge_join.location = (x, 0)
@@ -174,7 +175,7 @@ def get_or_create_bool_cutter_node_group():
     # Pass 2: bridge gaps (endpoints only)
     link(merge_dupes.outputs['Geometry'], merge_join.inputs['Geometry'])
     link(bbox_scale_large.outputs['Value'], merge_join.inputs['Distance'])
-    link(vert_neighbors.outputs['Vertex Count'], is_endpoint.inputs[2])
+    link(vert_neighbors.outputs['Vertex Count'], is_endpoint.inputs['A'])
     link(is_endpoint.outputs['Result'], merge_join.inputs['Selection'])
 
     link(merge_join.outputs['Geometry'], mesh_to_curve.inputs['Mesh'])
@@ -450,8 +451,8 @@ def _extract_cutter_mesh(context, gp_obj, thickness, resolution):
     try:
         mod = cleaned_gp.modifiers.new(name="_BoolCutter", type='NODES')
         mod.node_group = node_group
-        mod[mod.node_group.interface.items_tree['Thickness'].identifier] = thickness
-        mod[mod.node_group.interface.items_tree['Resolution'].identifier] = resolution
+        set_input(mod, mod.node_group.interface.items_tree['Thickness'].identifier, thickness)
+        set_input(mod, mod.node_group.interface.items_tree['Resolution'].identifier, resolution)
 
         # Force depsgraph to pick up the new modifier
         context.view_layer.update()

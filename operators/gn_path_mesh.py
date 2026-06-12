@@ -1,5 +1,6 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
+from ..utils.modifier_io import set_menu
 
 NODE_GROUP_NAME = "GreaseMesh_Path"
 
@@ -513,8 +514,8 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
         # Set Normal Mode default to Minimum Twist
         for item in mod.node_group.interface.items_tree:
             if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
-                mod[item.identifier] = 0
-                mod[item.identifier + "_menu"] = 'Minimum Twist'
+                set_menu(mod, item.identifier, 'Minimum Twist',
+                         legacy_value=0, legacy_menu='Minimum Twist')
                 break
 
         context.view_layer.objects.active = gp_obj

@@ -1,5 +1,6 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
+from ..utils.modifier_io import set_input
 from .gn_solid_mesh import (
     _pca_plane,
     _viewport_camera_position,
@@ -458,7 +459,7 @@ class GPTOOLS_OT_gn_blocks_mesh(bpy.types.Operator):
             if getattr(item, 'in_out', None) != 'INPUT':
                 continue
             if item.name in socket_values:
-                mod[item.identifier] = socket_values[item.name]
+                set_input(mod, item.identifier, socket_values[item.name])
 
         gp_obj.update_tag()
 

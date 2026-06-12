@@ -1,4 +1,5 @@
 import bpy
+from ..utils.modifier_io import set_input, set_menu
 from mathutils import Vector
 
 
@@ -108,9 +109,9 @@ class GPTOOLS_OT_array_on_curve(bpy.types.Operator):
             return {"CANCELLED"}
 
         # Configure: Shape = Curve, Count Method = Distance, Curve Object = converted GP
-        mod["Socket_2"] = 2       # Shape: Curve
-        mod["Socket_33"] = 1      # Count Method: Distance
-        mod["Socket_27"] = curve_obj  # Curve Object
+        set_menu(mod, "Socket_2", "Curve", legacy_value=2)       # Shape: Curve
+        set_menu(mod, "Socket_33", "Distance", legacy_value=1)   # Count Method: Distance
+        set_input(mod, "Socket_27", curve_obj)                   # Curve Object
 
         # Switch Properties panel to Modifier tab
         try:

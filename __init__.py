@@ -20,11 +20,9 @@ from .operators import (
     gn_blocks_mesh,
     gn_wall_mesh,
     screw_mesh,
-    lattice_wrap,
     bool_cut,
     array_on_curve,
     apply_modifiers,
-    stamp_scatter,
     knife_cut,
 )
 
@@ -38,11 +36,9 @@ if _needs_reload:
     gn_blocks_mesh = importlib.reload(gn_blocks_mesh)
     gn_wall_mesh = importlib.reload(gn_wall_mesh)
     screw_mesh = importlib.reload(screw_mesh)
-    lattice_wrap = importlib.reload(lattice_wrap)
     bool_cut = importlib.reload(bool_cut)
     array_on_curve = importlib.reload(array_on_curve)
     apply_modifiers = importlib.reload(apply_modifiers)
-    stamp_scatter = importlib.reload(stamp_scatter)
     knife_cut = importlib.reload(knife_cut)
 
 registration_modules = [
@@ -54,11 +50,9 @@ registration_modules = [
     gn_blocks_mesh,
     gn_wall_mesh,
     screw_mesh,
-    lattice_wrap,
     bool_cut,
     array_on_curve,
     apply_modifiers,
-    stamp_scatter,
     knife_cut,
 ]
 

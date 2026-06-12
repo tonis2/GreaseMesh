@@ -1,6 +1,7 @@
 import bpy
 import mathutils
 from ..utils.conversion import get_active_grease_pencil
+from ..utils.modifier_io import set_input
 
 NODE_GROUP_NAME = "GreaseMesh_Solid"
 MODIFIER_NAME = "SolidMesh"
@@ -229,8 +230,8 @@ def get_or_create_solid_node_group():
     vert_neighbors = nodes.new('GeometryNodeInputMeshVertexNeighbors'); vert_neighbors.location = (-300, -150)
     is_endpoint = nodes.new('FunctionNodeCompare'); is_endpoint.location = (-100, -150)
     is_endpoint.data_type = 'INT'; is_endpoint.operation = 'EQUAL'
-    is_endpoint.inputs[3].default_value = 1
-    link(vert_neighbors.outputs['Vertex Count'], is_endpoint.inputs[2])
+    is_endpoint.inputs['B'].default_value = 1
+    link(vert_neighbors.outputs['Vertex Count'], is_endpoint.inputs['A'])
 
     merge_join = nodes.new('GeometryNodeMergeByDistance'); merge_join.location = (-300, 0)
     link(merge_dupes.outputs['Geometry'], merge_join.inputs['Geometry'])
@@ -350,7 +351,7 @@ class GPTOOLS_OT_gn_solid_mesh(bpy.types.Operator):
             if getattr(item, 'in_out', None) != 'INPUT':
                 continue
             if item.name in socket_values:
-                mod[item.identifier] = socket_values[item.name]
+                set_input(mod, item.identifier, socket_values[item.name])
 
         gp_obj.update_tag()
 
