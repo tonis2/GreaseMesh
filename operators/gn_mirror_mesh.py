@@ -1,8 +1,16 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
-from .gn_solid_mesh import get_or_create_solid_node_group
+from ..utils.modifier_io import ensure_nodes_modifier, show_modifier_tab
+from ..utils.node_groups import get_or_rebuild_group
+from .gn_solid_mesh import (
+    get_or_create_solid_node_group,
+    compute_plane_basis,
+    set_plane_basis_inputs,
+)
 
 NODE_GROUP_NAME = "GreaseMesh_Mirror"
+MODIFIER_NAME = "MirrorMesh"
+GROUP_VERSION = 1  # bump whenever the graph or interface changes
 
 AXIS_NAMES = ["Mirror X", "Mirror Y", "Mirror Z"]
 AXIS_SCALES = [(-1, 1, 1), (1, -1, 1), (1, 1, -1)]
@@ -34,6 +42,18 @@ def _build_interface(ng):
         name="Merge Distance", in_out='INPUT', socket_type='NodeSocketFloat',
     )
     s.default_value, s.min_value, s.max_value = 0.001, 0.0, 1.0
+
+    for name, default in (
+        ("Center", (0.0, 0.0, 0.0)),
+        ("U", (1.0, 0.0, 0.0)),
+        ("V", (0.0, 1.0, 0.0)),
+        ("Normal", (0.0, 0.0, 1.0)),
+    ):
+        s = ng.interface.new_socket(
+            name=name, in_out='INPUT', socket_type='NodeSocketVector',
+        )
+        s.default_value = default
+        s.hide_in_modifier = True
 
     ng.interface.new_socket(
         name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry',
@@ -123,20 +143,15 @@ def _add_mirror_stage(ng, link, group_in, prev_output, axis_name, scale, x):
     return switch.outputs['Output']
 
 
-def get_or_create_mirror_node_group():
-    """Get existing or build the Mirror Mesh geometry node group.
+def _build(ng):
+    """Build the Mirror Mesh geometry node group.
 
     Pipeline:
       [GreaseMesh_Solid subgroup] → shift bbox min to origin
         → per-axis mirror stage (X, Y, Z) with toggle switches
         → Set Shade Smooth → Group Output
     """
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if ng is not None:
-        return ng
-
     solid_ng = get_or_create_solid_node_group()
-    ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
     _build_interface(ng)
 
     link = ng.links.new
@@ -154,6 +169,8 @@ def get_or_create_mirror_node_group():
     link(group_in.outputs['Geometry'], solid_group.inputs['Geometry'])
     link(group_in.outputs['Resolution'], solid_group.inputs['Resolution'])
     link(group_in.outputs['Thickness'], solid_group.inputs['Thickness'])
+    for basis_name in ("Center", "U", "V", "Normal"):
+        link(group_in.outputs[basis_name], solid_group.inputs[basis_name])
 
     # Shift so bbox min is at origin (mirror seam)
     x += 200
@@ -176,7 +193,9 @@ def get_or_create_mirror_node_group():
 
     link(prev, group_out.inputs['Geometry'])
 
-    return ng
+
+def get_or_create_mirror_node_group():
+    return get_or_rebuild_group(NODE_GROUP_NAME, GROUP_VERSION, _build)
 
 
 class GPTOOLS_OT_gn_mirror_mesh(bpy.types.Operator):
@@ -196,22 +215,19 @@ class GPTOOLS_OT_gn_mirror_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        mod = gp_obj.modifiers.new(name="MirrorMesh", type='NODES')
-        mod.node_group = get_or_create_mirror_node_group()
+        basis = compute_plane_basis(context, gp_obj)
+        if basis is None:
+            self.report({"ERROR"}, "Need at least 3 stroke points")
+            return {"CANCELLED"}
+
+        node_group = get_or_create_mirror_node_group()
+        mod = ensure_nodes_modifier(gp_obj, MODIFIER_NAME, node_group)
+        set_plane_basis_inputs(mod, node_group, basis)
 
         context.view_layer.objects.active = gp_obj
         gp_obj.select_set(True)
 
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'MODIFIER'
-                            break
-                    break
-        except TypeError:
-            pass
+        show_modifier_tab(context)
 
         self.report({"INFO"}, "Mirror mesh GN modifier added.")
         return {"FINISHED"}

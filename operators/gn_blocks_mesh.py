@@ -1,11 +1,10 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
-from ..utils.modifier_io import set_input
+from ..utils.modifier_io import ensure_nodes_modifier, show_properties_tab, show_modifier_tab
+from ..utils.node_groups import get_or_rebuild_group
 from .gn_solid_mesh import (
-    _pca_plane,
-    _viewport_camera_position,
-    _sign_correct_outward,
-    _build_basis,
+    compute_plane_basis,
+    set_plane_basis_inputs,
     _add_dot,
     _add_scale,
     _add_vec_op,
@@ -13,6 +12,7 @@ from .gn_solid_mesh import (
 
 NODE_GROUP_NAME = "GreaseMesh_Blocks"
 MODIFIER_NAME = "BlocksMesh"
+GROUP_VERSION = 1  # bump whenever the graph or interface changes
 PAINT_LAYER_NAME = "Paint"
 
 
@@ -48,18 +48,6 @@ def ensure_gp_layers(gp_obj):
         paint.frames.new(scene_frame)
 
 
-def _show_properties_tab(context, tab):
-    try:
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                for space in area.spaces:
-                    if space.type == 'PROPERTIES':
-                        space.context = tab
-                        return
-    except TypeError:
-        pass
-
-
 # ---------------------------------------------------------------------------
 # Geometry Nodes graph — basis-change pipeline applied per-Paint-stroke.
 #
@@ -77,15 +65,7 @@ def _show_properties_tab(context, tab):
 # ---------------------------------------------------------------------------
 
 
-def get_or_create_blocks_node_group():
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if ng is not None:
-        ng.nodes.clear()
-        for item in list(ng.interface.items_tree):
-            ng.interface.remove(item)
-    else:
-        ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
-
+def _build(ng):
     iface = ng.interface
     iface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
 
@@ -387,7 +367,9 @@ def get_or_create_blocks_node_group():
     group_out = nodes.new('NodeGroupOutput'); group_out.location = (3800, 0)
     link(noise_set_pos.outputs['Geometry'], group_out.inputs['Geometry'])
 
-    return ng
+
+def get_or_create_blocks_node_group():
+    return get_or_rebuild_group(NODE_GROUP_NAME, GROUP_VERSION, _build)
 
 
 # ---------------------------------------------------------------------------
@@ -423,43 +405,18 @@ class GPTOOLS_OT_gn_blocks_mesh(bpy.types.Operator):
                 if layer.name != PAINT_LAYER_NAME:
                     gp_obj.data.layers.active = layer
                     break
-            _show_properties_tab(context, 'DATA')
+            show_properties_tab(context, 'DATA')
             self.report(
                 {"WARNING"},
                 "Draw a line on any non-'Paint' layer first, then click Blocks again.",
             )
             return {"CANCELLED"}
 
-        centroid_local, normal_local = _pca_plane(path_pts)
-
-        mw = gp_obj.matrix_world
-        centroid_world = mw @ centroid_local
-        normal_world = (mw.to_3x3() @ normal_local).normalized()
-        oriented = _sign_correct_outward(centroid_world, normal_world, gp_obj, context)
-        if (oriented - normal_world).length > 1e-6:
-            normal_local = -normal_local
-        normal_local.normalize()
-
-        u_local, v_local = _build_basis(normal_local)
+        basis = compute_plane_basis(context, gp_obj, pts=path_pts)
 
         node_group = get_or_create_blocks_node_group()
-
-        mod = gp_obj.modifiers.get(MODIFIER_NAME)
-        if mod is None or mod.type != 'NODES':
-            mod = gp_obj.modifiers.new(name=MODIFIER_NAME, type='NODES')
-        mod.node_group = node_group
-
-        socket_values = {
-            'Center': (centroid_local.x, centroid_local.y, centroid_local.z),
-            'U':      (u_local.x, u_local.y, u_local.z),
-            'V':      (v_local.x, v_local.y, v_local.z),
-            'Normal': (normal_local.x, normal_local.y, normal_local.z),
-        }
-        for item in node_group.interface.items_tree:
-            if getattr(item, 'in_out', None) != 'INPUT':
-                continue
-            if item.name in socket_values:
-                set_input(mod, item.identifier, socket_values[item.name])
+        mod = ensure_nodes_modifier(gp_obj, MODIFIER_NAME, node_group)
+        set_plane_basis_inputs(mod, node_group, basis)
 
         gp_obj.update_tag()
 
@@ -469,7 +426,7 @@ class GPTOOLS_OT_gn_blocks_mesh(bpy.types.Operator):
         gp_obj.select_set(True)
         context.view_layer.objects.active = gp_obj
 
-        _show_properties_tab(context, 'MODIFIER')
+        show_modifier_tab(context)
 
         paint_layer = gp_obj.data.layers.get(PAINT_LAYER_NAME)
         if paint_layer is not None and not _layer_has_strokes(paint_layer):

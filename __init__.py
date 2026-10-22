@@ -2,7 +2,7 @@ bl_info = {
     "name": "Grease Mesh",
     "description": "Easy toolbox for creating meshes from Grease Pencil",
     "author": "Tonis",
-    "version": (1, 0, 3),
+    "version": (1, 0, 8),
     "blender": (4, 2, 0),
     "category": "Mesh",
 }
@@ -24,6 +24,9 @@ from .operators import (
     array_on_curve,
     apply_modifiers,
     knife_cut,
+    gn_stroke_mesh,
+    bind_to_surface,
+    gn_scatter,
 )
 
 if _needs_reload:
@@ -40,6 +43,9 @@ if _needs_reload:
     array_on_curve = importlib.reload(array_on_curve)
     apply_modifiers = importlib.reload(apply_modifiers)
     knife_cut = importlib.reload(knife_cut)
+    gn_stroke_mesh = importlib.reload(gn_stroke_mesh)
+    bind_to_surface = importlib.reload(bind_to_surface)
+    gn_scatter = importlib.reload(gn_scatter)
 
 registration_modules = [
     panels,
@@ -54,6 +60,9 @@ registration_modules = [
     array_on_curve,
     apply_modifiers,
     knife_cut,
+    gn_stroke_mesh,
+    bind_to_surface,
+    gn_scatter,
 ]
 
 

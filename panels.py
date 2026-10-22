@@ -28,6 +28,8 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         grid.operator("gptools.gn_path_mesh", text="Path", icon="MOD_CURVE")
         grid.operator("gptools.gn_blocks_mesh", text="Blocks", icon="MOD_ARRAY")
         grid.operator("gptools.gn_wall_mesh", text="Wall", icon="MOD_BUILD")
+        grid.operator("gptools.gn_stroke_mesh", text="Stroke", icon="STROKE")
+        grid.operator("gptools.gn_scatter", text="Scatter", icon="OUTLINER_OB_POINTCLOUD")
 
         # Screw Mesh Section
         box = layout.box()
@@ -42,6 +44,7 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         grid.operator("gptools.bool_cut", text="Bool Cut", icon="MOD_BOOLEAN")
         grid.operator("gptools.array_on_curve", text="Array on Pencil", icon="MOD_ARRAY")
         grid.operator("gptools.knife_cut", text="Knife", icon="MOD_EDGESPLIT")
+        grid.operator("gptools.bind_to_surface", text="Bind to Surface", icon="ARMATURE_DATA")
 
 
 classes = [

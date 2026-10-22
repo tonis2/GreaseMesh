@@ -1,10 +1,12 @@
 import bpy
 import mathutils
 from ..utils.conversion import get_active_grease_pencil
-from ..utils.modifier_io import set_input
+from ..utils.modifier_io import set_input, ensure_nodes_modifier, show_modifier_tab
+from ..utils.node_groups import get_or_rebuild_group
 
 NODE_GROUP_NAME = "GreaseMesh_Solid"
 MODIFIER_NAME = "SolidMesh"
+GROUP_VERSION = 1  # bump whenever the graph or interface below changes
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,43 @@ def _build_basis(normal):
     return u, v
 
 
+def compute_plane_basis(context, gp_obj, pts=None):
+    """Fit a plane through the GP's stroke points (or ``pts``, local space) and
+    return the hidden-socket values {'Center', 'U', 'V', 'Normal'} as tuples in
+    GP-local space, with Normal facing the viewport. None if < 3 points."""
+    if pts is None:
+        pts = _gather_stroke_points_local(gp_obj)
+    if len(pts) < 3:
+        return None
+
+    centroid_local, normal_local = _pca_plane(pts)
+
+    mw = gp_obj.matrix_world
+    centroid_world = mw @ centroid_local
+    normal_world = (mw.to_3x3() @ normal_local).normalized()
+    oriented = _sign_correct_outward(centroid_world, normal_world, gp_obj, context)
+    if (oriented - normal_world).length > 1e-6:
+        normal_local = -normal_local
+    normal_local.normalize()
+
+    u_local, v_local = _build_basis(normal_local)
+    return {
+        'Center': tuple(centroid_local),
+        'U':      tuple(u_local),
+        'V':      tuple(v_local),
+        'Normal': tuple(normal_local),
+    }
+
+
+def set_plane_basis_inputs(mod, node_group, socket_values):
+    """Write compute_plane_basis() values into the modifier's hidden sockets."""
+    for item in node_group.interface.items_tree:
+        if getattr(item, 'in_out', None) != 'INPUT':
+            continue
+        if item.name in socket_values:
+            set_input(mod, item.identifier, socket_values[item.name])
+
+
 # ---------------------------------------------------------------------------
 # Geometry Nodes graph — basis-change pipeline.
 #
@@ -146,15 +185,7 @@ def _add_vec_op(ng, op, a, b):
     return n.outputs['Vector']
 
 
-def get_or_create_solid_node_group():
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if ng is not None:
-        ng.nodes.clear()
-        for item in list(ng.interface.items_tree):
-            ng.interface.remove(item)
-    else:
-        ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
-
+def _build(ng):
     iface = ng.interface
     iface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
 
@@ -290,7 +321,9 @@ def get_or_create_solid_node_group():
     group_out = nodes.new('NodeGroupOutput'); group_out.location = (2700, 0)
     link(merge_final.outputs['Geometry'], group_out.inputs['Geometry'])
 
-    return ng
+
+def get_or_create_solid_node_group():
+    return get_or_rebuild_group(NODE_GROUP_NAME, GROUP_VERSION, _build)
 
 
 # ---------------------------------------------------------------------------
@@ -317,41 +350,14 @@ class GPTOOLS_OT_gn_solid_mesh(bpy.types.Operator):
             self.report({"ERROR"}, "No active Grease Pencil found")
             return {"CANCELLED"}
 
-        pts = _gather_stroke_points_local(gp_obj)
-        if len(pts) < 3:
+        basis = compute_plane_basis(context, gp_obj)
+        if basis is None:
             self.report({"ERROR"}, "Need at least 3 stroke points")
             return {"CANCELLED"}
 
-        centroid_local, normal_local = _pca_plane(pts)
-
-        mw = gp_obj.matrix_world
-        centroid_world = mw @ centroid_local
-        normal_world = (mw.to_3x3() @ normal_local).normalized()
-        oriented = _sign_correct_outward(centroid_world, normal_world, gp_obj, context)
-        if (oriented - normal_world).length > 1e-6:
-            normal_local = -normal_local
-        normal_local.normalize()
-
-        u_local, v_local = _build_basis(normal_local)
-
         node_group = get_or_create_solid_node_group()
-
-        mod = gp_obj.modifiers.get(MODIFIER_NAME)
-        if mod is None or mod.type != 'NODES':
-            mod = gp_obj.modifiers.new(name=MODIFIER_NAME, type='NODES')
-        mod.node_group = node_group
-
-        socket_values = {
-            'Center': (centroid_local.x, centroid_local.y, centroid_local.z),
-            'U':      (u_local.x, u_local.y, u_local.z),
-            'V':      (v_local.x, v_local.y, v_local.z),
-            'Normal': (normal_local.x, normal_local.y, normal_local.z),
-        }
-        for item in node_group.interface.items_tree:
-            if getattr(item, 'in_out', None) != 'INPUT':
-                continue
-            if item.name in socket_values:
-                set_input(mod, item.identifier, socket_values[item.name])
+        mod = ensure_nodes_modifier(gp_obj, MODIFIER_NAME, node_group)
+        set_plane_basis_inputs(mod, node_group, basis)
 
         gp_obj.update_tag()
 
@@ -361,16 +367,7 @@ class GPTOOLS_OT_gn_solid_mesh(bpy.types.Operator):
         gp_obj.select_set(True)
         context.view_layer.objects.active = gp_obj
 
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'MODIFIER'
-                            break
-                    break
-        except TypeError:
-            pass
+        show_modifier_tab(context)
 
         self.report(
             {"INFO"},

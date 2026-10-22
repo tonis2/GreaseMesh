@@ -1,11 +1,14 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
+from ..utils.modifier_io import ensure_nodes_modifier, show_modifier_tab
+from ..utils.node_groups import get_or_rebuild_group
 
 NODE_GROUP_NAME = "GreaseMesh_Wall"
+GROUP_VERSION = 1  # bump whenever the graph or interface below changes
 
 
-def get_or_create_wall_node_group():
-    """Get existing or build the Wall Mesh geometry node group.
+def _build(ng):
+    """Build the Wall Mesh geometry node group into the empty tree ``ng``.
 
     Pipeline:
       GP (floor plan strokes) → Curves → Curve to Mesh (edges only)
@@ -18,12 +21,6 @@ def get_or_create_wall_node_group():
     The Merge by Distance step handles floor plans drawn as multiple
     strokes — their endpoints get welded into a single continuous curve.
     """
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if ng is not None:
-        return ng
-
-    ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
-
     # Interface sockets
     ng.interface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
 
@@ -47,6 +44,11 @@ def get_or_create_wall_node_group():
     thick_sock.default_value = 0.3
     thick_sock.min_value = 0.01
     thick_sock.max_value = 10.0
+
+    closed_sock = ng.interface.new_socket(
+        name="Closed", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    closed_sock.default_value = True
 
     merge_sock = ng.interface.new_socket(
         name="Merge Distance", in_out='INPUT', socket_type='NodeSocketFloat',
@@ -112,7 +114,6 @@ def get_or_create_wall_node_group():
     x += 200
     set_cyclic = ng.nodes.new('GeometryNodeSetSplineCyclic')
     set_cyclic.location = (x, 0)
-    set_cyclic.inputs['Cyclic'].default_value = True
 
     # Force curve normal to Z-up so walls stay vertical
     x += 200
@@ -174,6 +175,7 @@ def get_or_create_wall_node_group():
     link(fillet.outputs['Curve'], resample.inputs['Curve'])
     link(group_in.outputs['Resolution'], resample.inputs['Count'])
     link(resample.outputs['Curve'], set_cyclic.inputs['Curve'])
+    link(group_in.outputs['Closed'], set_cyclic.inputs['Cyclic'])
     link(set_cyclic.outputs['Curve'], set_normal.inputs['Curve'])
 
     # Rectangle profile: Width = Thickness, Height = Height
@@ -193,7 +195,9 @@ def get_or_create_wall_node_group():
     link(curve_to_mesh.outputs['Mesh'], shade_flat.inputs['Mesh'])
     link(shade_flat.outputs['Mesh'], group_out.inputs['Geometry'])
 
-    return ng
+
+def get_or_create_wall_node_group():
+    return get_or_rebuild_group(NODE_GROUP_NAME, GROUP_VERSION, _build)
 
 
 class GPTOOLS_OT_gn_wall_mesh(bpy.types.Operator):
@@ -215,22 +219,12 @@ class GPTOOLS_OT_gn_wall_mesh(bpy.types.Operator):
 
         node_group = get_or_create_wall_node_group()
 
-        mod = gp_obj.modifiers.new(name="WallMesh", type='NODES')
-        mod.node_group = node_group
+        ensure_nodes_modifier(gp_obj, "WallMesh", node_group)
 
         context.view_layer.objects.active = gp_obj
         gp_obj.select_set(True)
 
-        try:
-            for area in context.screen.areas:
-                if area.type == 'PROPERTIES':
-                    for space in area.spaces:
-                        if space.type == 'PROPERTIES':
-                            space.context = 'MODIFIER'
-                            break
-                    break
-        except TypeError:
-            pass
+        show_modifier_tab(context)
 
         self.report({"INFO"}, "Wall mesh GN modifier added.")
         return {"FINISHED"}

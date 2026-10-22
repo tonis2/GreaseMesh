@@ -1,8 +1,10 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
-from ..utils.modifier_io import set_menu
+from ..utils.modifier_io import set_menu, ensure_nodes_modifier, show_properties_tab, show_modifier_tab
+from ..utils.node_groups import get_or_rebuild_group
 
 NODE_GROUP_NAME = "GreaseMesh_Path"
+GROUP_VERSION = 1  # bump whenever the graph or interface changes
 
 PROFILE_LAYER_NAME = "Profile"
 PATH_LAYER_NAME = "Path"
@@ -301,19 +303,14 @@ def _add_flatten_profile(ng, link, geometry_out, x, y):
     return set_pos.outputs['Geometry']
 
 
-def get_or_create_path_node_group():
-    """Get existing or build the Path Mesh geometry node group.
+def _build(ng):
+    """Build the Path Mesh geometry node group.
 
     Pipeline:
       Profile: GP → Named Layer Selection → GP to Curves → Resample → Cyclic → Center
       Path:    GP → Named Layer Selection → GP to Curves → Resample
       Curve to Mesh(path, centered_profile, Fill Caps) → Output
     """
-    ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if ng is not None:
-        return ng
-
-    ng = bpy.data.node_groups.new(name=NODE_GROUP_NAME, type='GeometryNodeTree')
     _build_interface(ng)
 
     link = ng.links.new
@@ -447,20 +444,9 @@ def get_or_create_path_node_group():
     link(noise_scale.outputs['Vector'], noise_set_pos.inputs['Offset'])
     link(noise_set_pos.outputs['Geometry'], group_out.inputs['Geometry'])
 
-    return ng
 
-
-def _show_properties_tab(context, tab):
-    """Switch Properties editor to a specific tab."""
-    try:
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                for space in area.spaces:
-                    if space.type == 'PROPERTIES':
-                        space.context = tab
-                        return
-    except TypeError:
-        pass
+def get_or_create_path_node_group():
+    return get_or_rebuild_group(NODE_GROUP_NAME, GROUP_VERSION, _build)
 
 
 
@@ -494,7 +480,7 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
             return {"CANCELLED"}
 
         if not has_profile:
-            _show_properties_tab(context, 'DATA')
+            show_properties_tab(context, 'DATA')
             gp_data.layers.active = profile
             self.report(
                 {"WARNING"},
@@ -503,25 +489,27 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
             return {"CANCELLED"}
 
         if not has_path:
-            _show_properties_tab(context, 'DATA')
+            show_properties_tab(context, 'DATA')
             gp_data.layers.active = path
             self.report({"WARNING"}, "No strokes on 'Path' layer. Draw your sweep line there.")
             return {"CANCELLED"}
 
-        mod = gp_obj.modifiers.new(name="PathMesh", type='NODES')
-        mod.node_group = get_or_create_path_node_group()
+        is_new = gp_obj.modifiers.get("PathMesh") is None
+        mod = ensure_nodes_modifier(gp_obj, "PathMesh", get_or_create_path_node_group())
 
-        # Set Normal Mode default to Minimum Twist
-        for item in mod.node_group.interface.items_tree:
-            if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
-                set_menu(mod, item.identifier, 'Minimum Twist',
-                         legacy_value=0, legacy_menu='Minimum Twist')
-                break
+        # Set Normal Mode default to Minimum Twist (only on first creation,
+        # so re-runs don't reset the user's choice)
+        if is_new:
+            for item in mod.node_group.interface.items_tree:
+                if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
+                    set_menu(mod, item.identifier, 'Minimum Twist',
+                             legacy_value=0, legacy_menu='Minimum Twist')
+                    break
 
         context.view_layer.objects.active = gp_obj
         gp_obj.select_set(True)
 
-        _show_properties_tab(context, 'MODIFIER')
+        show_modifier_tab(context)
 
         self.report({"INFO"}, "Path mesh GN modifier added.")
         return {"FINISHED"}
