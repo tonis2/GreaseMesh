@@ -2,8 +2,8 @@ bl_info = {
     "name": "Grease Mesh",
     "description": "Easy toolbox for creating meshes from Grease Pencil",
     "author": "Tonis",
-    "version": (1, 0, 8),
-    "blender": (4, 2, 0),
+    "version": (1, 0, 9),
+    "blender": (5, 0, 0),
     "category": "Mesh",
 }
 
