@@ -1,4 +1,6 @@
 import bpy
+from .operators.gn_path_mesh import get_stage
+from .utils.conversion import get_active_grease_pencil
 
 
 class GPTOOLS_PT_main(bpy.types.Panel):
@@ -10,6 +12,10 @@ class GPTOOLS_PT_main(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+
+        stage = get_stage(get_active_grease_pencil(context))
+        if stage is not None:
+            self._draw_path_steps(layout, stage)
 
         # Create Section
         box = layout.box()
@@ -45,6 +51,23 @@ class GPTOOLS_PT_main(bpy.types.Panel):
         grid.operator("gptools.array_on_curve", text="Array on Pencil", icon="MOD_ARRAY")
         grid.operator("gptools.knife_cut", text="Knife", icon="MOD_EDGESPLIT")
         grid.operator("gptools.bind_to_surface", text="Bind to Surface", icon="ARMATURE_DATA")
+
+    def _draw_path_steps(self, layout, stage):
+        box = layout.box()
+        box.alert = True
+        if stage == 'PATH':
+            box.label(text="Path Mesh  1/2", icon="MOD_CURVE")
+            box.label(text="Draw the path to sweep along")
+            next_text, next_icon = "Next", "FORWARD"
+        else:
+            box.label(text="Path Mesh  2/2", icon="MOD_CURVE")
+            box.label(text="Draw the profile shape")
+            next_text, next_icon = "Done", "CHECKMARK"
+        row = box.row(align=True)
+        row.scale_y = 1.4
+        row.alert = False
+        row.operator("gptools.gn_path_next", text=next_text, icon=next_icon)
+        row.operator("gptools.gn_path_cancel", text="", icon="X")
 
 
 classes = [

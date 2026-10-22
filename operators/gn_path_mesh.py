@@ -1,6 +1,6 @@
 import bpy
 from ..utils.conversion import get_active_grease_pencil
-from ..utils.modifier_io import set_menu, ensure_nodes_modifier, show_properties_tab, show_modifier_tab
+from ..utils.modifier_io import set_menu, ensure_nodes_modifier, show_modifier_tab
 from ..utils.node_groups import get_or_rebuild_group
 
 NODE_GROUP_NAME = "GreaseMesh_Path"
@@ -12,7 +12,7 @@ PATH_LAYER_NAME = "Path"
 
 def _layer_has_strokes(layer):
     """Check if a GP layer has any drawn strokes."""
-    return any(len(f.drawing.strokes) > 0 for f in layer.frames)
+    return layer is not None and any(len(f.drawing.strokes) > 0 for f in layer.frames)
 
 
 def ensure_gp_layers(gp_obj):
@@ -450,8 +450,52 @@ def get_or_create_path_node_group():
 
 
 
+STAGE_PROP = "gm_path_stage"  # 'PATH' / 'PROFILE' while the guided drawing steps are open
+
+
+def get_stage(gp_obj):
+    return gp_obj.get(STAGE_PROP) if gp_obj is not None else None
+
+
+def _start_stage(context, gp_obj, stage):
+    """Make the stage's layer active and switch to Draw mode so the user can draw it."""
+    gp_obj[STAGE_PROP] = stage
+    layer_name = PATH_LAYER_NAME if stage == 'PATH' else PROFILE_LAYER_NAME
+    gp_obj.data.layers.active = gp_obj.data.layers.get(layer_name)
+    context.view_layer.objects.active = gp_obj
+    gp_obj.select_set(True)
+    if context.mode != 'PAINT_GREASE_PENCIL':
+        bpy.ops.object.mode_set(mode='PAINT_GREASE_PENCIL')
+
+
+def _end_stage(gp_obj):
+    if STAGE_PROP in gp_obj:
+        del gp_obj[STAGE_PROP]
+
+
+def _add_path_modifier(context, gp_obj):
+    is_new = gp_obj.modifiers.get("PathMesh") is None
+    mod = ensure_nodes_modifier(gp_obj, "PathMesh", get_or_create_path_node_group())
+
+    # Set Normal Mode default to Minimum Twist (only on first creation,
+    # so re-runs don't reset the user's choice)
+    if is_new:
+        for item in mod.node_group.interface.items_tree:
+            if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
+                set_menu(mod, item.identifier, 'Minimum Twist',
+                         legacy_value=0, legacy_menu='Minimum Twist')
+                break
+
+    context.view_layer.objects.active = gp_obj
+    gp_obj.select_set(True)
+    if context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    show_modifier_tab(context)
+
+
 class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
-    """Add Geometry Nodes modifier to sweep a profile along a path from Grease Pencil layers"""
+    """Sweep a profile along a drawn path. Walks you through the path and
+    profile steps in the panel when they're missing"""
 
     bl_idname = "gptools.gn_path_mesh"
     bl_label = "Path Mesh (GN)"
@@ -470,52 +514,75 @@ class GPTOOLS_OT_gn_path_mesh(bpy.types.Operator):
         ensure_gp_layers(gp_obj)
 
         gp_data = gp_obj.data
-        profile = gp_data.layers.get(PROFILE_LAYER_NAME)
-        path = gp_data.layers.get(PATH_LAYER_NAME)
-        has_profile = profile and _layer_has_strokes(profile)
-        has_path = path and _layer_has_strokes(path)
-
-        if not has_profile and not has_path:
-            self.report({"WARNING"}, "Draw a line first, then click Path Mesh again.")
-            return {"CANCELLED"}
-
-        if not has_profile:
-            show_properties_tab(context, 'DATA')
-            gp_data.layers.active = profile
-            self.report(
-                {"WARNING"},
-                "Draw the profile shape, then click Path Mesh again.",
-            )
-            return {"CANCELLED"}
+        has_profile = _layer_has_strokes(gp_data.layers.get(PROFILE_LAYER_NAME))
+        has_path = _layer_has_strokes(gp_data.layers.get(PATH_LAYER_NAME))
 
         if not has_path:
-            show_properties_tab(context, 'DATA')
-            gp_data.layers.active = path
-            self.report({"WARNING"}, "No strokes on 'Path' layer. Draw your sweep line there.")
-            return {"CANCELLED"}
+            _start_stage(context, gp_obj, 'PATH')
+            self.report({"INFO"}, "Draw the path, then click Next in the GMesh panel.")
+            return {"FINISHED"}
 
-        is_new = gp_obj.modifiers.get("PathMesh") is None
-        mod = ensure_nodes_modifier(gp_obj, "PathMesh", get_or_create_path_node_group())
+        if not has_profile:
+            _start_stage(context, gp_obj, 'PROFILE')
+            self.report({"INFO"}, "Draw the profile shape, then click Done in the GMesh panel.")
+            return {"FINISHED"}
 
-        # Set Normal Mode default to Minimum Twist (only on first creation,
-        # so re-runs don't reset the user's choice)
-        if is_new:
-            for item in mod.node_group.interface.items_tree:
-                if item.name == 'Normal Mode' and item.socket_type == 'NodeSocketMenu':
-                    set_menu(mod, item.identifier, 'Minimum Twist',
-                             legacy_value=0, legacy_menu='Minimum Twist')
-                    break
-
-        context.view_layer.objects.active = gp_obj
-        gp_obj.select_set(True)
-
-        show_modifier_tab(context)
-
+        _end_stage(gp_obj)
+        _add_path_modifier(context, gp_obj)
         self.report({"INFO"}, "Path mesh GN modifier added.")
         return {"FINISHED"}
 
 
-classes = [GPTOOLS_OT_gn_path_mesh]
+class GPTOOLS_OT_gn_path_next(bpy.types.Operator):
+    """Finish the current Path Mesh drawing step"""
+
+    bl_idname = "gptools.gn_path_next"
+    bl_label = "Next"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return get_stage(get_active_grease_pencil(context)) is not None
+
+    def execute(self, context):
+        gp_obj = get_active_grease_pencil(context)
+        stage = get_stage(gp_obj)
+        layer_name = PATH_LAYER_NAME if stage == 'PATH' else PROFILE_LAYER_NAME
+        layer = gp_obj.data.layers.get(layer_name)
+        if layer is None or not _layer_has_strokes(layer):
+            what = "path" if stage == 'PATH' else "profile shape"
+            self.report({"WARNING"}, f"Draw the {what} first.")
+            return {"CANCELLED"}
+
+        if stage == 'PATH':
+            ensure_gp_layers(gp_obj)
+            if not _layer_has_strokes(gp_obj.data.layers.get(PROFILE_LAYER_NAME)):
+                _start_stage(context, gp_obj, 'PROFILE')
+                return {"FINISHED"}
+
+        _end_stage(gp_obj)
+        _add_path_modifier(context, gp_obj)
+        self.report({"INFO"}, "Path mesh GN modifier added.")
+        return {"FINISHED"}
+
+
+class GPTOOLS_OT_gn_path_cancel(bpy.types.Operator):
+    """Stop the Path Mesh drawing steps. Strokes drawn so far are kept"""
+
+    bl_idname = "gptools.gn_path_cancel"
+    bl_label = "Cancel"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return get_stage(get_active_grease_pencil(context)) is not None
+
+    def execute(self, context):
+        _end_stage(get_active_grease_pencil(context))
+        return {"FINISHED"}
+
+
+classes = [GPTOOLS_OT_gn_path_mesh, GPTOOLS_OT_gn_path_next, GPTOOLS_OT_gn_path_cancel]
 
 
 def register():

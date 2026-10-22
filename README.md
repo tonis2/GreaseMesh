@@ -15,7 +15,7 @@ Non-destructive GP-to-mesh conversion powered by Geometry Nodes. The Grease Penc
 
 - **Solid Mesh** — Fills drawn shapes and extrudes them into solid 3D objects with adjustable thickness.
 - **Mirror Mesh** — Creates a mirrored solid mesh from a drawn half-shape. Draw one side, get both.
-- **Path Mesh** — Sweeps a cross-section profile along a drawn path. Draw the path on one layer, the profile on another.
+- **Path Mesh** — Sweeps a cross-section profile along a drawn path. Click **Path** and the panel walks you through it: draw the path → **Next**, draw the profile → **Done**. Strokes you've already drawn are used as the path.
 - **Blocks Mesh** — Each closed stroke on the `Paint` layer becomes its own extruded block (stones, bricks, tiles), with per-block rotation/scale/thickness jitter. Strokes on the other layer define the plane.
 - **Wall Mesh** — Generates a wall mesh from a drawn floor plan. Toggle **Closed** off for open wall runs.
 - **Stroke Mesh** — Turns the drawing into a mesh that still looks like the drawing: flat ribbons (or round tubes) that follow stroke thickness, with per-stroke materials and vertex colours kept. Set a **Surface Object** to lay ribbons flat on a surface; **Project onto Surface** snaps the strokes onto it — **Nearest** for strokes drawn on or close to the surface, **Drawing Direction** to project a drawing made in front of it, like a projector.
@@ -51,7 +51,7 @@ If the surface isn't rigged, also select an armature: **Bind to Surface** then p
 ## Tips
 - **Solid Mesh**: Draw closed shapes for best results. Adjust thickness in the modifier panel.
 - **Mirror Mesh**: Draw one half of a symmetrical shape. The flat edge aligns to the mirror axis automatically.
-- **Path Mesh**: Draw the sweep path first, then draw the cross-section profile on the second layer. Switch layers in Properties > Data.
+- **Path Mesh**: Draw the profile anywhere, from any view; it's centred and flattened automatically, but its size is kept. Use the ✕ next to Done to stop the steps; your strokes are kept.
 - **Bool Cut**: Target mesh must be solid (has wall thickness).
 - **Screw Mesh**: Draw half the silhouette of a round object. The axis and centerline are detected automatically.
 - **Scatter**: Points are raycast straight down (GP local −Z) onto the Ground Object, so keep the GP object unrotated. Fill Area fills in the XY plane — draw area shapes roughly horizontally on the ground. Increase **Min Distance** to stop props overlapping.
