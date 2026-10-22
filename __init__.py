@@ -27,6 +27,7 @@ from .operators import (
     gn_stroke_mesh,
     bind_to_surface,
     gn_scatter,
+    edit_drawing,
 )
 
 if _needs_reload:
@@ -46,6 +47,7 @@ if _needs_reload:
     gn_stroke_mesh = importlib.reload(gn_stroke_mesh)
     bind_to_surface = importlib.reload(bind_to_surface)
     gn_scatter = importlib.reload(gn_scatter)
+    edit_drawing = importlib.reload(edit_drawing)
 
 registration_modules = [
     panels,
@@ -63,6 +65,7 @@ registration_modules = [
     gn_stroke_mesh,
     bind_to_surface,
     gn_scatter,
+    edit_drawing,
 ]
 
 

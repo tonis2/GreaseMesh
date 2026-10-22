@@ -1,6 +1,7 @@
 import bpy
 
 from ..utils.modifier_io import get_input
+from .edit_drawing import end_edit
 
 
 def _surface_from_stroke_mesh(gp_obj):
@@ -67,6 +68,7 @@ def _apply_gp_modifiers(context, gp_obj):
     """
     if context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
+    end_edit(gp_obj)
 
     depsgraph = context.evaluated_depsgraph_get()
     gp_inv = gp_obj.matrix_world.inverted()
@@ -115,9 +117,14 @@ def _apply_gp_modifiers(context, gp_obj):
         bm.to_mesh(new_mesh)
         bm.free()
         new_mesh.update()
-        has_vcol = "vertex_color" in new_mesh.attributes
-        for mat in materials:
-            new_mesh.materials.append(_convert_gp_material(mat, has_vcol))
+        # Only Stroke Mesh is meant to look like the drawing; the other tools
+        # would just inherit the GP's (usually black) stroke material.
+        if gp_obj.modifiers.get("StrokeMesh") is not None:
+            has_vcol = "vertex_color" in new_mesh.attributes
+            for mat in materials:
+                new_mesh.materials.append(_convert_gp_material(mat, has_vcol))
+        elif "material_index" in new_mesh.attributes:
+            new_mesh.attributes.remove(new_mesh.attributes["material_index"])
         new_mesh_obj = bpy.data.objects.new(name=name, object_data=new_mesh)
         for col in collections:
             col.objects.link(new_mesh_obj)

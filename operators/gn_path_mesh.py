@@ -1,10 +1,12 @@
+import math
+
 import bpy
 from ..utils.conversion import get_active_grease_pencil
 from ..utils.modifier_io import set_menu, ensure_nodes_modifier, show_modifier_tab
 from ..utils.node_groups import get_or_rebuild_group
 
 NODE_GROUP_NAME = "GreaseMesh_Path"
-GROUP_VERSION = 1  # bump whenever the graph or interface changes
+GROUP_VERSION = 2  # bump whenever the graph or interface changes
 
 PROFILE_LAYER_NAME = "Profile"
 PATH_LAYER_NAME = "Path"
@@ -139,227 +141,230 @@ def _add_gp_branch(ng, link, group_in, layer_name, res_socket_name, cyclic, x, y
     return out
 
 
-def _add_center_offset(ng, link, curve_out, x, y):
-    """Center geometry at origin using bbox. Returns Set Position output."""
-    bbox = ng.nodes.new('GeometryNodeBoundBox')
-    bbox.location = (x, y - 200)
-
-    vec_add = ng.nodes.new('ShaderNodeVectorMath')
-    vec_add.location = (x + 200, y - 200)
-    vec_add.operation = 'ADD'
-
-    vec_half = ng.nodes.new('ShaderNodeVectorMath')
-    vec_half.location = (x + 400, y - 200)
-    vec_half.operation = 'SCALE'
-    vec_half.inputs['Scale'].default_value = 0.5
-
-    vec_neg = ng.nodes.new('ShaderNodeVectorMath')
-    vec_neg.location = (x + 600, y - 200)
-    vec_neg.operation = 'SCALE'
-    vec_neg.inputs['Scale'].default_value = -1.0
-
-    pos = ng.nodes.new('GeometryNodeInputPosition')
-    pos.location = (x + 400, y + 100)
-
-    add_offset = ng.nodes.new('ShaderNodeVectorMath')
-    add_offset.location = (x + 800, y + 100)
-    add_offset.operation = 'ADD'
-
-    set_pos = ng.nodes.new('GeometryNodeSetPosition')
-    set_pos.location = (x + 1000, y)
-
-    link(curve_out, bbox.inputs['Geometry'])
-    link(bbox.outputs['Min'], vec_add.inputs[0])
-    link(bbox.outputs['Max'], vec_add.inputs[1])
-    link(vec_add.outputs['Vector'], vec_half.inputs[0])
-    link(vec_half.outputs['Vector'], vec_neg.inputs[0])
-    link(pos.outputs['Position'], add_offset.inputs[0])
-    link(vec_neg.outputs['Vector'], add_offset.inputs[1])
-    link(curve_out, set_pos.inputs['Geometry'])
-    link(add_offset.outputs['Vector'], set_pos.inputs['Position'])
-
-    return set_pos.outputs['Geometry']
+def _node(ng, idname, loc, **props):
+    """Create a node at ``loc`` and set the given RNA properties on it."""
+    node = ng.nodes.new(idname)
+    node.location = loc
+    for key, value in props.items():
+        setattr(node, key, value)
+    return node
 
 
-def _add_flatten_profile(ng, link, geometry_out, x, y):
-    """Flatten profile to XY plane by detecting the thinnest bbox axis.
+def _feed(link, socket, value):
+    """Link ``value`` into ``socket`` if it is a socket, else set it as default."""
+    if value is None:
+        return
+    if isinstance(value, bpy.types.NodeSocket):
+        link(value, socket)
+    else:
+        socket.default_value = value
 
-    Finds which axis (X, Y, or Z) has the smallest extent and discards it,
-    remapping the other two axes to X and Y.  This lets users draw the
-    profile from any view angle (top, front, side) and get a correct result.
+
+def _math(ng, link, op, a, b=None, loc=(0, 0), clamp=False):
+    node = _node(ng, 'ShaderNodeMath', loc, operation=op, use_clamp=clamp)
+    _feed(link, node.inputs[0], a)
+    _feed(link, node.inputs[1], b)
+    return node.outputs['Value']
+
+
+def _imath(ng, link, op, a, b=None, c=None, loc=(0, 0)):
+    node = _node(ng, 'FunctionNodeIntegerMath', loc, operation=op)
+    _feed(link, node.inputs[0], a)
+    _feed(link, node.inputs[1], b)
+    _feed(link, node.inputs[2], c)
+    return node.outputs['Value']
+
+
+def _vmath(ng, link, op, a, b=None, loc=(0, 0), scale=None):
+    node = _node(ng, 'ShaderNodeVectorMath', loc, operation=op)
+    _feed(link, node.inputs[0], a)
+    _feed(link, node.inputs[1], b)
+    _feed(link, node.inputs[3], scale)  # 'Scale'
+    out = 'Value' if op in {'DOT_PRODUCT', 'LENGTH', 'DISTANCE'} else 'Vector'
+    return node.outputs[out]
+
+
+def _compare(ng, link, op, a, b, loc=(0, 0)):
+    node = _node(ng, 'FunctionNodeCompare', loc, data_type='FLOAT', operation=op)
+    _feed(link, node.inputs['A'], a)
+    _feed(link, node.inputs['B'], b)
+    return node.outputs['Result']
+
+
+def _switch(ng, link, input_type, cond, if_false, if_true, loc=(0, 0)):
+    node = _node(ng, 'GeometryNodeSwitch', loc, input_type=input_type)
+    _feed(link, node.inputs['Switch'], cond)
+    _feed(link, node.inputs['False'], if_false)
+    _feed(link, node.inputs['True'], if_true)
+    return node.outputs['Output']
+
+
+def _sample_index(ng, link, geometry, value, index, data_type, loc=(0, 0)):
+    """Sample ``value`` on the point domain of ``geometry`` at ``index``."""
+    node = _node(ng, 'GeometryNodeSampleIndex', loc, data_type=data_type, domain='POINT')
+    link(geometry, node.inputs['Geometry'])
+    link(value, node.inputs['Value'])
+    _feed(link, node.inputs['Index'], index)
+    return node.outputs['Value']
+
+
+def _separate(ng, link, vec, loc=(0, 0)):
+    node = _node(ng, 'ShaderNodeSeparateXYZ', loc)
+    link(vec, node.inputs['Vector'])
+    return node.outputs
+
+
+def _add_axis_remap(ng, link, extent, vec, x, y):
+    """Drop the thinnest axis of ``extent`` from ``vec``, remapping the other
+    two to (X, Y, 0).  Works per element when ``extent`` is a field, so every
+    profile can be drawn from its own view angle (top, front, side):
+
+      X thinnest → (Y, Z)    Y thinnest → (X, Z)    Z thinnest → (X, Y)
     """
-    # --- bbox extent per axis ---
-    bbox = ng.nodes.new('GeometryNodeBoundBox')
-    bbox.location = (x, y - 250)
+    ext = _separate(ng, link, extent, (x, y - 250))
 
-    extent = ng.nodes.new('ShaderNodeVectorMath')
-    extent.location = (x + 200, y - 250)
-    extent.operation = 'SUBTRACT'
-
-    sep_ext = ng.nodes.new('ShaderNodeSeparateXYZ')
-    sep_ext.location = (x + 400, y - 250)
-
-    link(geometry_out, bbox.inputs['Geometry'])
-    link(bbox.outputs['Max'], extent.inputs[0])
-    link(bbox.outputs['Min'], extent.inputs[1])
-    link(extent.outputs['Vector'], sep_ext.inputs['Vector'])
-
-    # --- detect thinnest axis ---
     # x_thin = (ext_x <= ext_y) AND (ext_x <= ext_z)
-    cmp_xy = ng.nodes.new('FunctionNodeCompare')
-    cmp_xy.location = (x + 600, y - 150)
-    cmp_xy.data_type = 'FLOAT'
-    cmp_xy.operation = 'LESS_EQUAL'
-
-    cmp_xz = ng.nodes.new('FunctionNodeCompare')
-    cmp_xz.location = (x + 600, y - 300)
-    cmp_xz.data_type = 'FLOAT'
-    cmp_xz.operation = 'LESS_EQUAL'
-
-    x_thin = ng.nodes.new('FunctionNodeBooleanMath')
-    x_thin.location = (x + 800, y - 200)
-    x_thin.operation = 'AND'
-
-    link(sep_ext.outputs['X'], cmp_xy.inputs['A'])
-    link(sep_ext.outputs['Y'], cmp_xy.inputs['B'])
-    link(sep_ext.outputs['X'], cmp_xz.inputs['A'])
-    link(sep_ext.outputs['Z'], cmp_xz.inputs['B'])
-    link(cmp_xy.outputs['Result'], x_thin.inputs[0])
-    link(cmp_xz.outputs['Result'], x_thin.inputs[1])
+    x_thin = _node(ng, 'FunctionNodeBooleanMath', (x + 400, y - 200), operation='AND')
+    link(_compare(ng, link, 'LESS_EQUAL', ext['X'], ext['Y'], (x + 200, y - 150)), x_thin.inputs[0])
+    link(_compare(ng, link, 'LESS_EQUAL', ext['X'], ext['Z'], (x + 200, y - 300)), x_thin.inputs[1])
 
     # y_thin = (ext_y < ext_x) AND (ext_y <= ext_z)
-    cmp_yx = ng.nodes.new('FunctionNodeCompare')
-    cmp_yx.location = (x + 600, y - 450)
-    cmp_yx.data_type = 'FLOAT'
-    cmp_yx.operation = 'LESS_THAN'
+    y_thin = _node(ng, 'FunctionNodeBooleanMath', (x + 400, y - 500), operation='AND')
+    link(_compare(ng, link, 'LESS_THAN', ext['Y'], ext['X'], (x + 200, y - 450)), y_thin.inputs[0])
+    link(_compare(ng, link, 'LESS_EQUAL', ext['Y'], ext['Z'], (x + 200, y - 600)), y_thin.inputs[1])
 
-    cmp_yz = ng.nodes.new('FunctionNodeCompare')
-    cmp_yz.location = (x + 600, y - 600)
-    cmp_yz.data_type = 'FLOAT'
-    cmp_yz.operation = 'LESS_EQUAL'
+    comp = _separate(ng, link, vec, (x, y + 100))
+    remaps = {}
+    for i, (axis, (a, b)) in enumerate((('X', ('Y', 'Z')), ('Y', ('X', 'Z')), ('Z', ('X', 'Y')))):
+        node = _node(ng, 'ShaderNodeCombineXYZ', (x + 400, y + 200 - 150 * i))
+        link(comp[a], node.inputs['X'])
+        link(comp[b], node.inputs['Y'])
+        remaps[axis] = node.outputs['Vector']
 
-    y_thin = ng.nodes.new('FunctionNodeBooleanMath')
-    y_thin.location = (x + 800, y - 500)
-    y_thin.operation = 'AND'
-
-    link(sep_ext.outputs['Y'], cmp_yx.inputs['A'])
-    link(sep_ext.outputs['X'], cmp_yx.inputs['B'])
-    link(sep_ext.outputs['Y'], cmp_yz.inputs['A'])
-    link(sep_ext.outputs['Z'], cmp_yz.inputs['B'])
-    link(cmp_yx.outputs['Result'], y_thin.inputs[0])
-    link(cmp_yz.outputs['Result'], y_thin.inputs[1])
-
-    # --- position components ---
-    pos = ng.nodes.new('GeometryNodeInputPosition')
-    pos.location = (x, y + 100)
-
-    sep_pos = ng.nodes.new('ShaderNodeSeparateXYZ')
-    sep_pos.location = (x + 200, y + 100)
-
-    link(pos.outputs['Position'], sep_pos.inputs['Vector'])
-
-    # --- build remapped positions ---
-    # X thinnest → (Y, Z, 0)
-    pos_x = ng.nodes.new('ShaderNodeCombineXYZ')
-    pos_x.location = (x + 800, y + 200)
-    link(sep_pos.outputs['Y'], pos_x.inputs['X'])
-    link(sep_pos.outputs['Z'], pos_x.inputs['Y'])
-
-    # Y thinnest → (X, Z, 0)
-    pos_y = ng.nodes.new('ShaderNodeCombineXYZ')
-    pos_y.location = (x + 800, y + 50)
-    link(sep_pos.outputs['X'], pos_y.inputs['X'])
-    link(sep_pos.outputs['Z'], pos_y.inputs['Y'])
-
-    # Z thinnest → (X, Y, 0)
-    pos_z = ng.nodes.new('ShaderNodeCombineXYZ')
-    pos_z.location = (x + 800, y - 100)
-    link(sep_pos.outputs['X'], pos_z.inputs['X'])
-    link(sep_pos.outputs['Y'], pos_z.inputs['Y'])
-
-    # --- switches to pick the right remap ---
-    # inner switch: y_thin ? pos_y : pos_z
-    sw_yz = ng.nodes.new('GeometryNodeSwitch')
-    sw_yz.location = (x + 1000, y - 50)
-    sw_yz.input_type = 'VECTOR'
-    link(y_thin.outputs['Boolean'], sw_yz.inputs['Switch'])
-    link(pos_z.outputs['Vector'], sw_yz.inputs['False'])
-    link(pos_y.outputs['Vector'], sw_yz.inputs['True'])
-
-    # outer switch: x_thin ? pos_x : sw_yz
-    sw_final = ng.nodes.new('GeometryNodeSwitch')
-    sw_final.location = (x + 1200, y + 100)
-    sw_final.input_type = 'VECTOR'
-    link(x_thin.outputs['Boolean'], sw_final.inputs['Switch'])
-    link(sw_yz.outputs['Output'], sw_final.inputs['False'])
-    link(pos_x.outputs['Vector'], sw_final.inputs['True'])
-
-    # --- apply ---
-    set_pos = ng.nodes.new('GeometryNodeSetPosition')
-    set_pos.location = (x + 1400, y)
-    link(geometry_out, set_pos.inputs['Geometry'])
-    link(sw_final.outputs['Output'], set_pos.inputs['Position'])
-
-    return set_pos.outputs['Geometry']
+    yz = _switch(ng, link, 'VECTOR', y_thin.outputs['Boolean'], remaps['Z'], remaps['Y'],
+                 (x + 600, y - 50))
+    return _switch(ng, link, 'VECTOR', x_thin.outputs['Boolean'], yz, remaps['X'],
+                   (x + 800, y + 100))
 
 
-def _build(ng):
-    """Build the Path Mesh geometry node group.
+def _add_profile_alignment(ng, link, group_in, profiles, x, y):
+    """Centre, flatten and normalise every profile stroke on its own.
 
-    Pipeline:
-      Profile: GP → Named Layer Selection → GP to Curves → Resample → Cyclic → Center
-      Path:    GP → Named Layer Selection → GP to Curves → Resample
-      Curve to Mesh(path, centered_profile, Fill Caps) → Output
+    Each profile (one curve, exactly N = Profile Resolution points) is centred
+    on its own bbox centre and flattened by its own thinnest bbox axis.  Then
+    its point order is normalised so profiles blend without twisting:
+      * winding: shoelace signed area of the flattened 2D shape; traversal is
+        reversed when negative, so every profile is counter-clockwise (that is
+        what makes Curve to Mesh produce outward facing normals);
+      * start: the point with the smallest atan2(y, x) in [0, 2π) becomes 0.
+
+    Returns (geometry, aligned, center): ``aligned`` is the flattened 2D point
+    at aligned position ``Index in Curve`` and ``center`` the profile's bbox
+    centre in object space, both captured on the point domain.
     """
-    _build_interface(ng)
+    res = group_in.outputs['Profile Resolution']
 
-    link = ng.links.new
+    curve_of_pt = _node(ng, 'GeometryNodeCurveOfPoint', (x, y + 200))
+    curve_id = curve_of_pt.outputs['Curve Index']
+    idx_in_curve = curve_of_pt.outputs['Index in Curve']
+    pos = _node(ng, 'GeometryNodeInputPosition', (x, y)).outputs['Position']
 
-    group_in = ng.nodes.new('NodeGroupInput')
-    group_in.location = (-1000, 0)
+    # --- per-profile bbox → centre / extent ---
+    bounds = _node(ng, 'GeometryNodeFieldMinAndMax', (x + 200, y - 200),
+                   data_type='FLOAT_VECTOR', domain='POINT')
+    link(pos, bounds.inputs['Value'])
+    link(curve_id, bounds.inputs['Group ID'])
+    center = _vmath(ng, link, 'SCALE',
+                    _vmath(ng, link, 'ADD', bounds.outputs['Min'], bounds.outputs['Max'],
+                           (x + 400, y - 150)),
+                    loc=(x + 600, y - 150), scale=0.5)
+    extent = _vmath(ng, link, 'SUBTRACT', bounds.outputs['Max'], bounds.outputs['Min'],
+                    (x + 400, y - 300))
+    local = _vmath(ng, link, 'SUBTRACT', pos, center, (x + 800, y))
+    flat = _add_axis_remap(ng, link, extent, local, x=x + 1000, y=y)
 
-    # Profile branch (cyclic, centered)
-    profile_out = _add_gp_branch(
-        ng, link, group_in, PROFILE_LAYER_NAME, 'Profile Resolution',
-        cyclic=True, x=-800, y=200,
+    # --- winding: shoelace sum of cross(p_i, p_i+1).z per profile ---
+    wx = x + 2000
+    nxt = _node(ng, 'GeometryNodeOffsetPointInCurve', (wx, y + 400))
+    nxt.inputs['Offset'].default_value = 1
+    flat_next = _node(ng, 'GeometryNodeFieldAtIndex', (wx + 200, y + 400),
+                      data_type='FLOAT_VECTOR', domain='POINT')
+    link(flat, flat_next.inputs['Value'])
+    link(nxt.outputs['Point Index'], flat_next.inputs['Index'])
+    edge_cross = _vmath(ng, link, 'CROSS_PRODUCT', flat, flat_next.outputs['Value'],
+                        (wx + 400, y + 400))
+    area = _node(ng, 'GeometryNodeAccumulateField', (wx + 800, y + 400),
+                 data_type='FLOAT', domain='POINT')
+    link(_separate(ng, link, edge_cross, (wx + 600, y + 400))['Z'], area.inputs['Value'])
+    link(curve_id, area.inputs['Group ID'])
+    direction = _switch(
+        ng, link, 'INT',
+        _compare(ng, link, 'GREATER_EQUAL', area.outputs['Total'], 0.0, (wx + 1000, y + 400)),
+        -1, 1, (wx + 1200, y + 400),
     )
-    centered_profile = _add_center_offset(ng, link, profile_out, x=0, y=200)
-    flattened_profile = _add_flatten_profile(ng, link, centered_profile, x=1100, y=200)
 
-    # Path branch: GP → Curves → Fillet → Resample
-    # (Fillet must come before Resample so it rounds actual corners, not every point)
-    path_x = -800
-    path_y = -200
+    # --- start point: smallest angle around the centre, in [0, 2π) ---
+    flat_c = _separate(ng, link, flat, (wx, y + 100))
+    angle = _math(ng, link, 'FLOORED_MODULO',
+                  _math(ng, link, 'ARCTAN2', flat_c['Y'], flat_c['X'], (wx + 200, y + 100)),
+                  2.0 * math.pi, (wx + 400, y + 100))
+    angle_min = _node(ng, 'GeometryNodeFieldMinAndMax', (wx + 600, y + 100),
+                      data_type='FLOAT', domain='POINT')
+    link(angle, angle_min.inputs['Value'])
+    link(curve_id, angle_min.inputs['Group ID'])
+    candidate = _switch(
+        ng, link, 'INT',
+        _compare(ng, link, 'LESS_EQUAL', angle, angle_min.outputs['Min'], (wx + 800, y + 100)),
+        1 << 30, idx_in_curve, (wx + 1000, y + 100),
+    )
+    start = _node(ng, 'GeometryNodeFieldMinAndMax', (wx + 1200, y + 100),
+                  data_type='INT', domain='POINT')
+    link(candidate, start.inputs['Value'])
+    link(curve_id, start.inputs['Group ID'])
 
-    path_sel = ng.nodes.new('GeometryNodeInputNamedLayerSelection')
-    path_sel.location = (path_x, path_y)
+    # --- aligned point j of profile k = flat[k*N + (start + dir*j) mod N] ---
+    src = _imath(ng, link, 'FLOORED_MODULO',
+                 _imath(ng, link, 'MULTIPLY_ADD', direction, idx_in_curve,
+                        start.outputs['Min'], (wx + 1400, y + 250)),
+                 res, loc=(wx + 1600, y + 250))
+    src = _imath(ng, link, 'MULTIPLY_ADD', curve_id, res, src, (wx + 1800, y + 250))
+    aligned = _node(ng, 'GeometryNodeFieldAtIndex', (wx + 2000, y + 250),
+                    data_type='FLOAT_VECTOR', domain='POINT')
+    link(flat, aligned.inputs['Value'])
+    link(src, aligned.inputs['Index'])
+
+    capture = _node(ng, 'GeometryNodeCaptureAttribute', (wx + 2200, y), domain='POINT')
+    capture.capture_items.new('VECTOR', 'Aligned')
+    capture.capture_items.new('VECTOR', 'Center')
+    link(profiles, capture.inputs['Geometry'])
+    link(aligned.outputs['Value'], capture.inputs['Aligned'])
+    link(center, capture.inputs['Center'])
+    return capture.outputs['Geometry'], capture.outputs['Aligned'], capture.outputs['Center']
+
+
+def _add_path_branch(ng, link, group_in, x, y):
+    """GP 'Path' layer → Curves → edges → Merge → Curve → Fillet → Resample →
+    Set Curve Normal.  Returns the path curve output."""
+    path_sel = _node(ng, 'GeometryNodeInputNamedLayerSelection', (x, y))
     path_sel.inputs['Name'].default_value = PATH_LAYER_NAME
 
-    path_gp = ng.nodes.new('GeometryNodeGreasePencilToCurves')
-    path_gp.location = (path_x + 200, path_y)
+    path_gp = _node(ng, 'GeometryNodeGreasePencilToCurves', (x + 200, y))
     path_gp.inputs['Layers as Instances'].default_value = False
 
     # Convert curves → edges → merge nearby points → back to curve
     # This straightens segments and collapses GP noise into clean corners
-    curves_to_edges = ng.nodes.new('GeometryNodeCurveToMesh')
-    curves_to_edges.location = (path_x + 400, path_y)
+    curves_to_edges = _node(ng, 'GeometryNodeCurveToMesh', (x + 400, y))
+    merge = _node(ng, 'GeometryNodeMergeByDistance', (x + 600, y))
+    edges_to_curve = _node(ng, 'GeometryNodeMeshToCurve', (x + 800, y))
 
-    merge = ng.nodes.new('GeometryNodeMergeByDistance')
-    merge.location = (path_x + 600, path_y)
-
-    edges_to_curve = ng.nodes.new('GeometryNodeMeshToCurve')
-    edges_to_curve.location = (path_x + 800, path_y)
-
-    fillet = ng.nodes.new('GeometryNodeFilletCurve')
-    fillet.location = (path_x + 1000, path_y)
+    # Fillet must come before Resample so it rounds actual corners, not every point
+    fillet = _node(ng, 'GeometryNodeFilletCurve', (x + 1000, y))
     fillet.inputs['Mode'].default_value = 'Poly'
 
-    path_resample = ng.nodes.new('GeometryNodeResampleCurve')
-    path_resample.location = (path_x + 1200, path_y)
+    path_resample = _node(ng, 'GeometryNodeResampleCurve', (x + 1200, y))
 
     # Set curve normal mode (user-switchable from modifier panel)
-    set_normal = ng.nodes.new('GeometryNodeSetCurveNormal')
-    set_normal.location = (path_x + 1400, path_y)
+    set_normal = _node(ng, 'GeometryNodeSetCurveNormal', (x + 1400, y))
 
     link(group_in.outputs['Geometry'], path_gp.inputs['Grease Pencil'])
     link(path_sel.outputs['Selection'], path_gp.inputs['Selection'])
@@ -374,56 +379,235 @@ def _build(ng):
     link(group_in.outputs['Path Resolution'], path_resample.inputs['Count'])
     link(path_resample.outputs['Curve'], set_normal.inputs['Curve'])
     link(group_in.outputs['Normal Mode'], set_normal.inputs['Mode'])
-    path_out = set_normal.outputs['Curve']
+    return set_normal.outputs['Curve']
 
-    # Sweep profile along path
-    curve_to_mesh = ng.nodes.new('GeometryNodeCurveToMesh')
-    curve_to_mesh.location = (1800, 0)
+
+def _add_profile_keys(ng, link, group_in, profiles, center, path, x, y):
+    """One point per profile at (t, 0, 0), sorted by t, where t is the spline
+    parameter factor of the path point nearest to the profile's bbox centre.
+
+    Returns (keys geometry, captured profile index field, profile count).
+    """
+    res = group_in.outputs['Profile Resolution']
+
+    count = _node(ng, 'GeometryNodeAttributeDomainSize', (x, y), component='CURVE')
+    link(profiles, count.inputs['Geometry'])
+    num_profiles = count.outputs['Spline Count']
+
+    # Profile k's points are k*N .. k*N + N-1, so its centre is at index k*N
+    index = _node(ng, 'GeometryNodeInputIndex', (x, y - 200)).outputs['Index']
+    first = _imath(ng, link, 'MULTIPLY', index, res, loc=(x + 200, y - 200))
+    centers = _node(ng, 'GeometryNodePoints', (x + 600, y))
+    link(num_profiles, centers.inputs['Count'])
+    link(_sample_index(ng, link, profiles, center, first, 'FLOAT_VECTOR', (x + 400, y - 200)),
+         centers.inputs['Position'])
+
+    profile_id = _node(ng, 'GeometryNodeCaptureAttribute', (x + 800, y), domain='POINT')
+    profile_id.capture_items.new('INT', 'Profile')
+    link(centers.outputs['Points'], profile_id.inputs['Geometry'])
+    link(index, profile_id.inputs['Profile'])
+
+    # Nearest path point (3D) → its spline parameter factor
+    path_points = _node(ng, 'GeometryNodeCurveToPoints', (x + 400, y - 450), mode='EVALUATED')
+    link(path, path_points.inputs['Curve'])
+    nearest = _node(ng, 'GeometryNodeSampleNearest', (x + 600, y - 450), domain='POINT')
+    link(path_points.outputs['Points'], nearest.inputs['Geometry'])
+    factor = _node(ng, 'GeometryNodeSplineParameter', (x + 600, y - 600)).outputs['Factor']
+    t = _sample_index(ng, link, path, factor, nearest.outputs['Index'], 'FLOAT',
+                      (x + 800, y - 450))
+    key_pos = _node(ng, 'ShaderNodeCombineXYZ', (x + 1000, y - 300))
+    link(t, key_pos.inputs['X'])
+
+    set_key = _node(ng, 'GeometryNodeSetPosition', (x + 1200, y))
+    link(profile_id.outputs['Geometry'], set_key.inputs['Geometry'])
+    link(key_pos.outputs['Vector'], set_key.inputs['Position'])
+
+    sort = _node(ng, 'GeometryNodeSortElements', (x + 1600, y), domain='POINT')
+    link(set_key.outputs['Geometry'], sort.inputs['Geometry'])
+    key_x = _separate(ng, link, _node(ng, 'GeometryNodeInputPosition', (x + 1200, y - 200))
+                      .outputs['Position'], (x + 1400, y - 200))['X']
+    link(key_x, sort.inputs['Sort Weight'])
+
+    return sort.outputs['Geometry'], profile_id.outputs['Profile'], num_profiles
+
+
+def _add_loft(ng, link, group_in, path, profiles, aligned, keys, profile_id,
+              num_profiles, x, y):
+    """Sweep along the path, blending between the sorted profiles.
+
+    Topology comes from Curve to Mesh(path, N-point circle): vertex v belongs
+    to path point i = v div N and aligned profile point j = v mod N.  Each
+    vertex is placed like Curve to Mesh places a profile point (px, py):
+    P + px·Normal + py·cross(Tangent, Normal), with (px, py) linearly blended
+    between the two profiles around the vertex's path factor (held constant
+    before the first / after the last profile).
+    """
+    res = group_in.outputs['Profile Resolution']
+
+    template = _node(ng, 'GeometryNodeCurvePrimitiveCircle', (x, y + 200), mode='POINTS')
+    link(res, template.inputs['Resolution'])
+    sweep = _node(ng, 'GeometryNodeCurveToMesh', (x + 200, y + 200))
+    link(path, sweep.inputs['Curve'])
+    link(template.outputs['Curve'], sweep.inputs['Profile Curve'])
+    link(group_in.outputs['Fill Caps'], sweep.inputs['Fill Caps'])
+
+    # --- vertex → (path point i, profile point j) ---
+    index = _node(ng, 'GeometryNodeInputIndex', (x, y - 100)).outputs['Index']
+    ring = _imath(ng, link, 'DIVIDE_FLOOR', index, res, loc=(x + 200, y - 100))
+    j = _imath(ng, link, 'FLOORED_MODULO', index, res, loc=(x + 200, y - 250))
+
+    # --- path frame at point i ---
+    sx = x + 400
+    path_pos = _sample_index(ng, link, path,
+                             _node(ng, 'GeometryNodeInputPosition', (sx, y)).outputs['Position'],
+                             ring, 'FLOAT_VECTOR', (sx + 200, y))
+    normal = _sample_index(ng, link, path,
+                           _node(ng, 'GeometryNodeInputNormal', (sx, y - 200)).outputs['Normal'],
+                           ring, 'FLOAT_VECTOR', (sx + 200, y - 200))
+    tangent = _sample_index(ng, link, path,
+                            _node(ng, 'GeometryNodeInputTangent', (sx, y - 400)).outputs['Tangent'],
+                            ring, 'FLOAT_VECTOR', (sx + 200, y - 400))
+    f = _sample_index(ng, link, path,
+                      _node(ng, 'GeometryNodeSplineParameter', (sx, y - 600)).outputs['Factor'],
+                      ring, 'FLOAT', (sx + 200, y - 600))
+
+    # --- neighbouring profiles lo/hi around f ---
+    kx = x + 800
+    key_t = _separate(ng, link, _node(ng, 'GeometryNodeInputPosition', (kx, y - 1000))
+                      .outputs['Position'], (kx + 200, y - 1000))['X']
+    f_vec = _node(ng, 'ShaderNodeCombineXYZ', (kx, y - 800))
+    link(f, f_vec.inputs['X'])
+    nearest = _node(ng, 'GeometryNodeSampleNearest', (kx + 200, y - 800), domain='POINT')
+    link(keys, nearest.inputs['Geometry'])
+    link(f_vec.outputs['Vector'], nearest.inputs['Sample Position'])
+    near = nearest.outputs['Index']
+    t_near = _sample_index(ng, link, keys, key_t, near, 'FLOAT', (kx + 400, y - 900))
+    after = _compare(ng, link, 'GREATER_EQUAL', f, t_near, (kx + 600, y - 800))
+
+    last = _imath(ng, link, 'SUBTRACT', num_profiles, 1, loc=(kx + 400, y - 1150))
+    prev_k = _imath(ng, link, 'MAXIMUM',
+                    _imath(ng, link, 'SUBTRACT', near, 1, loc=(kx + 400, y - 1300)), 0,
+                    loc=(kx + 600, y - 1300))
+    next_k = _imath(ng, link, 'MINIMUM',
+                    _imath(ng, link, 'ADD', near, 1, loc=(kx + 600, y - 1150)), last,
+                    loc=(kx + 800, y - 1150))
+    lo = _switch(ng, link, 'INT', after, prev_k, near, (kx + 1000, y - 800))
+    hi = _switch(ng, link, 'INT', after, near, next_k, (kx + 1000, y - 1000))
+
+    bx = kx + 1200
+    t_lo = _sample_index(ng, link, keys, key_t, lo, 'FLOAT', (bx, y - 700))
+    t_hi = _sample_index(ng, link, keys, key_t, hi, 'FLOAT', (bx, y - 900))
+    k_lo = _sample_index(ng, link, keys, profile_id, lo, 'INT', (bx, y - 1100))
+    k_hi = _sample_index(ng, link, keys, profile_id, hi, 'INT', (bx, y - 1300))
+
+    # w = clamp((f - t_lo) / (t_hi - t_lo)); Math Divide returns 0 for t_lo == t_hi
+    weight = _math(ng, link, 'DIVIDE',
+                   _math(ng, link, 'SUBTRACT', f, t_lo, (bx + 200, y - 600)),
+                   _math(ng, link, 'SUBTRACT', t_hi, t_lo, (bx + 200, y - 800)),
+                   (bx + 400, y - 700), clamp=True)
+
+    # --- blended 2D profile point ---
+    a_lo = _sample_index(ng, link, profiles, aligned,
+                         _imath(ng, link, 'MULTIPLY_ADD', k_lo, res, j, (bx + 200, y - 1100)),
+                         'FLOAT_VECTOR', (bx + 400, y - 1000))
+    a_hi = _sample_index(ng, link, profiles, aligned,
+                         _imath(ng, link, 'MULTIPLY_ADD', k_hi, res, j, (bx + 200, y - 1300)),
+                         'FLOAT_VECTOR', (bx + 400, y - 1200))
+    blend = _vmath(ng, link, 'ADD', a_lo,
+                   _vmath(ng, link, 'SCALE',
+                          _vmath(ng, link, 'SUBTRACT', a_hi, a_lo, (bx + 600, y - 1100)),
+                          loc=(bx + 800, y - 1000), scale=weight),
+                   (bx + 1000, y - 900))
+    p2 = _separate(ng, link, blend, (bx + 1200, y - 900))
+
+    # --- P + px·N + py·cross(T, N) ---
+    binormal = _vmath(ng, link, 'CROSS_PRODUCT', tangent, normal, (bx + 1200, y - 300))
+    offset = _vmath(ng, link, 'ADD',
+                    _vmath(ng, link, 'SCALE', normal, loc=(bx + 1400, y - 200), scale=p2['X']),
+                    _vmath(ng, link, 'SCALE', binormal, loc=(bx + 1400, y - 400), scale=p2['Y']),
+                    (bx + 1600, y - 300))
+    position = _vmath(ng, link, 'ADD', path_pos, offset, (bx + 1800, y - 200))
+
+    set_pos = _node(ng, 'GeometryNodeSetPosition', (bx + 2000, y + 200))
+    link(sweep.outputs['Mesh'], set_pos.inputs['Geometry'])
+    link(position, set_pos.inputs['Position'])
+    return set_pos.outputs['Geometry']
+
+
+def _build(ng):
+    """Build the Path Mesh geometry node group.
+
+    Pipeline:
+      Profile: GP → 'Profile' layer → GP to Curves → Resample (N) → Cyclic
+               → per profile: centre, flatten, normalise winding + start point
+      Path:    GP → 'Path' layer → GP to Curves → Merge → Fillet → Resample
+               → Set Curve Normal
+      Keys:    one point per profile at its path factor, sorted along the path
+      Loft:    Curve to Mesh(path, N-point circle) for topology, then Set
+               Position blending the two profiles around each ring
+               (no profiles → plain Curve to Mesh of the path, as before)
+      → Shade flat → Noise → Output
+    """
+    _build_interface(ng)
+
+    link = ng.links.new
+
+    group_in = _node(ng, 'NodeGroupInput', (-1400, 0))
+
+    # Profile branch (cyclic), every stroke centred/flattened/aligned on its own
+    profile_out = _add_gp_branch(
+        ng, link, group_in, PROFILE_LAYER_NAME, 'Profile Resolution',
+        cyclic=True, x=-1200, y=1200,
+    )
+    profiles, aligned, center = _add_profile_alignment(
+        ng, link, group_in, profile_out, x=-400, y=1200,
+    )
+
+    path_out = _add_path_branch(ng, link, group_in, x=-1200, y=-400)
+
+    keys, profile_id, num_profiles = _add_profile_keys(
+        ng, link, group_in, profiles, center, path_out, x=600, y=-400,
+    )
+
+    loft = _add_loft(
+        ng, link, group_in, path_out, profiles, aligned, keys, profile_id, num_profiles,
+        x=2600, y=0,
+    )
+
+    # Without any profile stroke fall back to Curve to Mesh of the bare path
+    no_profile = _node(ng, 'GeometryNodeCurveToMesh', (5400, -600))
+    link(path_out, no_profile.inputs['Curve'])
+    link(profiles, no_profile.inputs['Profile Curve'])
+    link(group_in.outputs['Fill Caps'], no_profile.inputs['Fill Caps'])
+    result = _switch(
+        ng, link, 'GEOMETRY',
+        _compare(ng, link, 'GREATER_THAN', num_profiles, 0, (5400, -400)),
+        no_profile.outputs['Mesh'], loft, (5600, 0),
+    )
 
     # Force flat shading (Curve to Mesh outputs smooth by default)
-    shade_flat = ng.nodes.new('GeometryNodeSetShadeSmooth')
-    shade_flat.location = (2000, 0)
+    ox = 5800
+    shade_flat = _node(ng, 'GeometryNodeSetShadeSmooth', (ox, 0))
     shade_flat.inputs['Shade Smooth'].default_value = False
 
     # Noise displacement nodes
-    noise_pos = ng.nodes.new('GeometryNodeInputPosition')
-    noise_pos.location = (2200, -200)
+    noise_pos = _node(ng, 'GeometryNodeInputPosition', (ox + 200, -200))
 
-    seed_mul = ng.nodes.new('ShaderNodeMath')
-    seed_mul.location = (2200, -400)
-    seed_mul.operation = 'MULTIPLY'
+    seed_mul = _node(ng, 'ShaderNodeMath', (ox + 200, -400), operation='MULTIPLY')
     seed_mul.inputs[1].default_value = 137.3
 
-    seed_combine = ng.nodes.new('ShaderNodeCombineXYZ')
-    seed_combine.location = (2400, -400)
+    seed_combine = _node(ng, 'ShaderNodeCombineXYZ', (ox + 400, -400))
+    seed_add = _node(ng, 'ShaderNodeVectorMath', (ox + 400, -200), operation='ADD')
+    noise_tex = _node(ng, 'ShaderNodeTexNoise', (ox + 600, -200), noise_dimensions='3D')
 
-    seed_add = ng.nodes.new('ShaderNodeVectorMath')
-    seed_add.location = (2400, -200)
-    seed_add.operation = 'ADD'
-
-    noise_tex = ng.nodes.new('ShaderNodeTexNoise')
-    noise_tex.location = (2600, -200)
-    noise_tex.noise_dimensions = '3D'
-
-    noise_center = ng.nodes.new('ShaderNodeVectorMath')
-    noise_center.location = (2800, -200)
-    noise_center.operation = 'SUBTRACT'
+    noise_center = _node(ng, 'ShaderNodeVectorMath', (ox + 800, -200), operation='SUBTRACT')
     noise_center.inputs[1].default_value = (0.5, 0.5, 0.5)
 
-    noise_scale = ng.nodes.new('ShaderNodeVectorMath')
-    noise_scale.location = (3000, -200)
-    noise_scale.operation = 'SCALE'
+    noise_scale = _node(ng, 'ShaderNodeVectorMath', (ox + 1000, -200), operation='SCALE')
+    noise_set_pos = _node(ng, 'GeometryNodeSetPosition', (ox + 1200, 0))
+    group_out = _node(ng, 'NodeGroupOutput', (ox + 1400, 0))
 
-    noise_set_pos = ng.nodes.new('GeometryNodeSetPosition')
-    noise_set_pos.location = (3200, 0)
-
-    group_out = ng.nodes.new('NodeGroupOutput')
-    group_out.location = (3400, 0)
-
-    link(path_out, curve_to_mesh.inputs['Curve'])
-    link(flattened_profile, curve_to_mesh.inputs['Profile Curve'])
-    link(group_in.outputs['Fill Caps'], curve_to_mesh.inputs['Fill Caps'])
-    link(curve_to_mesh.outputs['Mesh'], shade_flat.inputs['Mesh'])
+    link(result, shade_flat.inputs['Mesh'])
 
     # Noise pipeline links
     link(group_in.outputs['Noise Seed'], seed_mul.inputs[0])

@@ -10,7 +10,7 @@ from .gn_solid_mesh import (
 
 NODE_GROUP_NAME = "GreaseMesh_Mirror"
 MODIFIER_NAME = "MirrorMesh"
-GROUP_VERSION = 1  # bump whenever the graph or interface changes
+GROUP_VERSION = 2  # bump whenever the graph or interface changes
 
 AXIS_NAMES = ["Mirror X", "Mirror Y", "Mirror Z"]
 AXIS_SCALES = [(-1, 1, 1), (1, -1, 1), (1, 1, -1)]
@@ -31,6 +31,21 @@ def _build_interface(ng):
         name="Thickness", in_out='INPUT', socket_type='NodeSocketFloat',
     )
     s.default_value, s.min_value, s.max_value = 0.4, 0.0, 20.0
+
+    s = ng.interface.new_socket(
+        name="Inflate", in_out='INPUT', socket_type='NodeSocketFloat',
+    )
+    s.default_value, s.min_value, s.max_value = 0.0, 0.0, 5.0
+
+    s = ng.interface.new_socket(
+        name="Detail", in_out='INPUT', socket_type='NodeSocketInt',
+    )
+    s.default_value, s.min_value, s.max_value = 2, 0, 5
+
+    s = ng.interface.new_socket(
+        name="One-Sided", in_out='INPUT', socket_type='NodeSocketBool',
+    )
+    s.default_value = False
 
     for name, default in [("Mirror X", True), ("Mirror Y", False), ("Mirror Z", False)]:
         s = ng.interface.new_socket(
@@ -167,10 +182,17 @@ def _build(ng):
     solid_group.node_tree = solid_ng
 
     link(group_in.outputs['Geometry'], solid_group.inputs['Geometry'])
-    link(group_in.outputs['Resolution'], solid_group.inputs['Resolution'])
-    link(group_in.outputs['Thickness'], solid_group.inputs['Thickness'])
-    for basis_name in ("Center", "U", "V", "Normal"):
-        link(group_in.outputs[basis_name], solid_group.inputs[basis_name])
+    for name in ("Resolution", "Thickness", "Inflate", "Detail", "One-Sided",
+                 "Center", "U", "V", "Normal"):
+        link(group_in.outputs[name], solid_group.inputs[name])
+
+    # Seam Mask: the outline on enabled mirror planes is a seam, not an edge,
+    # so Inflate bulges straight across it instead of pinching to the plane.
+    seam_mask = ng.nodes.new('ShaderNodeCombineXYZ')
+    seam_mask.location = (x - 200, -300)
+    for axis_name, axis in zip(AXIS_NAMES, "XYZ"):
+        link(group_in.outputs[axis_name], seam_mask.inputs[axis])
+    link(seam_mask.outputs['Vector'], solid_group.inputs['Seam Mask'])
 
     # Shift so bbox min is at origin (mirror seam)
     x += 200

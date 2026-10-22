@@ -1,5 +1,6 @@
 import bpy
 from .operators.gn_path_mesh import get_stage
+from .operators.edit_drawing import get_edit_layer, is_greasemesh_gp
 from .utils.conversion import get_active_grease_pencil
 
 
@@ -13,9 +14,12 @@ class GPTOOLS_PT_main(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
 
-        stage = get_stage(get_active_grease_pencil(context))
+        gp_obj = get_active_grease_pencil(context)
+        stage = get_stage(gp_obj)
         if stage is not None:
             self._draw_path_steps(layout, stage)
+        elif is_greasemesh_gp(gp_obj):
+            self._draw_edit_drawing(layout, gp_obj)
 
         # Create Section
         box = layout.box()
@@ -61,13 +65,31 @@ class GPTOOLS_PT_main(bpy.types.Panel):
             next_text, next_icon = "Next", "FORWARD"
         else:
             box.label(text="Path Mesh  2/2", icon="MOD_CURVE")
-            box.label(text="Draw the profile shape")
+            box.label(text="Draw one or more profiles across the path")
             next_text, next_icon = "Done", "CHECKMARK"
         row = box.row(align=True)
         row.scale_y = 1.4
         row.alert = False
         row.operator("gptools.gn_path_next", text=next_text, icon=next_icon)
         row.operator("gptools.gn_path_cancel", text="", icon="X")
+
+    def _draw_edit_drawing(self, layout, gp_obj):
+        editing = get_edit_layer(gp_obj)
+        box = layout.box()
+        box.alert = editing is not None
+        box.label(text="Edit Drawing", icon="GREASEPENCIL")
+        grid = box.grid_flow(row_major=True, columns=2, align=True)
+        grid.alert = False
+        for layer in gp_obj.data.layers:
+            grid.operator(
+                "gptools.edit_drawing", text=layer.name,
+                depress=(layer.name == editing),
+            ).layer = layer.name
+        if editing is not None:
+            row = box.row()
+            row.scale_y = 1.4
+            row.alert = False
+            row.operator("gptools.edit_drawing_done", text="Done", icon="CHECKMARK")
 
 
 classes = [
